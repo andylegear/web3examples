@@ -1,0 +1,429 @@
+<!-- 
+    This HTML file is used to create a web page for decrypting a wallet.
+    It includes the necessary libraries (Web3 and jQuery) and a CSS file.
+    The page contains input fields for entering a password and selecting a wallet JSON file.
+    After clicking the "Decrypt Wallet" button, the script uses the Web3 library to decrypt the wallet using the provided password and the selected file.
+    The decrypted wallet address, private key, and keystore are then displayed in the respective textareas.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./sendPayableTransaction.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Load Wallet and Send a Payable Transaction</h1>
+        <button id="loadWalletButton">Load Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <!-- Select a wallet json file from the file system -->
+        <input type="file" id="keystoreFile" accept=".json">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <br/>
+        <h3 for="buyTokensButton">Buy Tokens from Contract <a href="https://sepolia.etherscan.io/address/0xf349aebe6ad110f28d133c8146cea2ac6c9fca86" target="_blank">0xf349aebe6ad110f28d133c8146cea2ac6c9fca86</a></h3>
+        <br/>
+        <button id="buyTokensButton">Buy Tokens</button>
+        <!-- Enter the amount to pay -->
+        <input id="amountToPay" type="number" id="amount" placeholder="Enter the amount to pay">
+        <br/>
+
+        <!-- Put the transaction request details here -->
+        <label for="transactionRequest">Transaction Request: </label>
+        <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+        <br/>
+        <!-- Put the transaction result details here -->
+        <label for="transactionResult">Transaction Result: </label>
+        <textarea id="transactionResult" rows="5" cols="50"></textarea>
+
+        <br/>
+        <br/>
+        <br/>
+
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to Sepolia
+        var web3 = new Web3("https://rpc2.sepolia.org");
+
+        $("#loadWalletButton").click(function(){
+
+            // return if no password is entered
+            if ($("#password").val() == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a password");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            // load the contents of the file#
+            var file = $("#keystoreFile")[0].files[0];
+            // return if no file is selected
+            if (!file){
+                    // show the modal with the error
+                    $("#errorMessage").text("Please select a file");
+                    $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e){
+                var keystore = e.target.result;
+                var password = $("#password").val();
+                try {
+                    // decrypt the wallet
+                    var wallet = web3.eth.accounts.decrypt(keystore, password);
+                    // display the wallet address
+                    $("#walletAddress").val(wallet.address);
+                    // display the private key
+                    $("#privateKey").val(wallet.privateKey);
+                    // display the keystore
+                    $("#keystore").val(keystore);
+                } catch (error) {
+                    // show the modal with the error
+                    $("#errorMessage").text(error.message);
+                    $("#errorModal").css("display", "block");
+
+                }
+            };
+            reader.readAsText(file);
+
+
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+
+        $("#buyTokensButton").click(function(){
+            // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+            var privateKey = $("#privateKey").val();
+
+            // alert if no private key is entered
+            if (privateKey == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a private key");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+            // contract creator 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+            var contractAddress = "0xf349aebe6ad110f28d133c8146cea2ac6c9fca86";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            var transaction = contract.methods.buyToken();
+            var encodedABI = transaction.encodeABI();
+            var amount = $("#amountToPay").val();
+            var tx = {
+                from: wallet.address,
+                to: contractAddress,
+                gas: 2000000,
+                data: encodedABI,
+                value: web3.utils.toWei(amount, 'ether') // Add the amount to the payable transaction
+            };
+
+            // show the modal saying that the transaction is in progress
+            $("#errorMessage").text("Transaction in progress.  This could take 30s");
+            $("#errorModal").css("display", "block");
+
+            web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+                web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+                    $("#transactionRequest").val(JSON.stringify(tx));
+                    $("#transactionResult").val(JSON.stringify(receipt));
+
+                    // dismiss the modal
+                    $("#errorModal").css("display", "block");
+                });
+            });
+
+        });
+        
+        const ABI = [
+	{
+		"inputs": [
+			{
+				"internalType": "string",
+				"name": "_name",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "_symbol",
+				"type": "string"
+			},
+			{
+				"internalType": "uint8",
+				"name": "_decimals",
+				"type": "uint8"
+			},
+			{
+				"internalType": "uint256",
+				"name": "initialSupply",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "constructor"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "value",
+				"type": "uint256"
+			}
+		],
+		"name": "Approval",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "approve",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "buyToken",
+		"outputs": [],
+		"stateMutability": "payable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "recipient",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transfer",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "from",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "to",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "value",
+				"type": "uint256"
+			}
+		],
+		"name": "Transfer",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "recipient",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transferFrom",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			}
+		],
+		"name": "allowance",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "account",
+				"type": "address"
+			}
+		],
+		"name": "balanceOf",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "decimals",
+		"outputs": [
+			{
+				"internalType": "uint8",
+				"name": "",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "name",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "symbol",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "totalSupply",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+];
+</script>
+</html>

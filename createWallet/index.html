@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./createWallet.css">
+    <title>Create a wallet</title>
+
+</head>
+<body>
+        <h1>Create a Wallet</h1>
+        <button id="createWalletButton">Create Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <br/>
+        <!-- Download the keystore as a file {wallet}.json -->
+        <a class="btn" id="downloadKeystore" download="wallet.json">Download Keystore</a>
+</body>
+
+<script>
+    $(document).ready(function(){
+        $("#createWalletButton").click(function(){
+
+             // alert if empty password
+            var password = $("#password").val();
+             if(password == ""){
+                alert("Please enter a password for the Key Store");
+                return;
+            }
+            // Create a new Web3 instance
+            var web3 = new Web3();
+
+            // Create a new wallet
+            var wallet = web3.eth.accounts.create();
+            // wallet address into the text area
+            $("#walletAddress").val(wallet.address);
+
+            // Display the private key
+            $("#privateKey").val(wallet.privateKey);
+
+
+            // Display the keystore file
+            var keystore = web3.eth.accounts.encrypt(wallet.privateKey, password);
+            $("#keystore").val(JSON.stringify(keystore));
+
+        });
+    });
+
+    
+    $("#downloadKeystore").click(function(){
+            var keystore = $("#keystore").val();
+            // alert if keystore is empty
+            if(keystore == ""){
+                alert("Please create a wallet first");
+                return;
+            }
+            var blob = new Blob([keystore], {type: "text/plain;charset=utf-8"});
+            var wallet = $("#walletAddress").val();
+            saveAs(blob, wallet + ".json");
+        });
+
+    function saveAs(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+    }
+</script>
+</html>

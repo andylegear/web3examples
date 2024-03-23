@@ -1,0 +1,357 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./checkBalance.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Check Balance</h1>
+        <label for="walletAddress">Enter your wallet address:</label>
+        <input type="text" id="walletAddress" name="walletAddress">
+        <br/>
+        <br/>
+
+        <button id="cryptoBalanceButton">Check Crypto Balance</button>
+        <br/>
+        <br/>
+
+        <label id="cryptoBalance">Crypto Balance: </label>
+        <br/>
+        <br/>
+        
+        <label for="tokenAddress">Enter the token address you are checking the token balance of:</label>
+        <input type="text" id="tokenAddress" name="tokenAddress">
+        <br/>
+        <button id="tokenBalanceButton">Check Token Balance</button>
+        <br/>
+        <br/>
+
+        <label id="tokenBalance">Token Balance:</label>
+        <br/>
+        <label id="tokenName">Token Name:</label>
+        <br/>
+        <label id="tokenSymbol">Token Symbol:</label>
+        <br/>
+        <label id="tokenDecimals">Token Decimals:</label>
+        <br/>
+        <label id="tokenTotalSupply">Token Total Supply:</label>
+        <br/>
+
+        <br/>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to the Sepolia test network on https://rpc2.sepolia.org
+        const web3 = new Web3("https://rpc2.sepolia.org");
+
+        // when you click cryptoBalanceButton button, check the balance of the wallet
+        $("#cryptoBalanceButton").click(function() {
+            // get the wallet address from the input field
+            // 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+            const walletAddress = $("#walletAddress").val();
+            // check if the wallet address is valid
+            if (web3.utils.isAddress(walletAddress)) {
+                
+                // get the balance of the wallet
+                web3.eth.getBalance(walletAddress).then(function(balance) {                    
+                    // convert the balance from wei to ether
+                    const balanceInEther = web3.utils.fromWei(balance, "ether");
+                    // display the balance
+                    $("#cryptoBalance").html("<strong>Crypto Balance: " + balanceInEther + " ETH</strong>");
+
+                    // NOTE: Compare your results for your wallet on the sepolia blockchain explorer https://sepolia.etherscan.io/
+                    // NOTE: You can add Sepolia Crypto to your wallet using the one of the many faucets here https://faucetlink.to/sepolia
+
+                });
+            } else {
+                // display an error message if the wallet address is invalid
+                $("#errorMessage").text("Invalid wallet address");
+                $("#errorModal").css("display", "block");
+            }
+        });
+
+        // when you click tokenBalanceButton button, check the balance of the token
+        $("#tokenBalanceButton").click(function() {
+            // get the wallet address from the input field
+            const walletAddress = $("#walletAddress").val();
+            // get the token address from the input field
+            const tokenAddress = $("#tokenAddress").val(); // 0x0addc2283aba4345616c278e7429facec3a83951
+            // check if the wallet address is valid
+            if (web3.utils.isAddress(walletAddress) && web3.utils.isAddress(tokenAddress)) {
+                // create a new contract instance using the ERC20 ABI and the token address
+                const contract = new web3.eth.Contract(IERC20_ABI, tokenAddress);
+                // call the balanceOf function of the contract to get the token balance of the wallet
+                contract.methods.balanceOf(walletAddress).call().then(function(balance) {
+                    // display the balance
+                    $("#tokenBalance").text("Token Balance: " + balance);
+
+                    // NOTE: You can get a random token for testing from a dedicated token faucet here https://faucet.quicknode.com/ethereum/sepolia 
+                    
+                });
+
+                contract.methods.name().call().then(function(name) {
+                    // display the token name
+                    $("#tokenName").text("Token Name: " + name);
+                });
+
+                contract.methods.symbol().call().then(function(symbol) {
+                    // display the token symbol
+                    $("#tokenSymbol").text("Token Symbol: " + symbol);
+                });
+
+                contract.methods.decimals().call().then(function(decimals) {
+                    // display the token decimals
+                    $("#tokenDecimals").text("Token Decimals: " + decimals);
+                });
+                contract.methods.totalSupply().call().then(function(totalSupply) {
+                    // display the token total supply
+                    $("#tokenTotalSupply").text("Token Total Supply: " + totalSupply);
+                });
+
+            } else {
+                // display an error message if the wallet address or token address is invalid
+                $("#errorMessage").text("Invalid wallet address or token address");
+                $("#errorModal").css("display", "block");
+            }
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+    
+        const IERC20_ABI = [
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "totalSupply",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "balanceOf",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transfer",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "name": "spender",
+                "type": "address"
+            }
+        ],
+        "name": "allowance",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "approve",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "sender",
+                "type": "address"
+            },
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transferFrom",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "from",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "to",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Transfer",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Approval",
+        "type": "event"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "name",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "symbol",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "decimals",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint8"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    }
+];
+</script>
+</html>

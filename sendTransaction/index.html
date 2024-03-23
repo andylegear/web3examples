@@ -1,0 +1,233 @@
+<!-- 
+    This HTML file is used to create a web page for decrypting a wallet.
+    It includes the necessary libraries (Web3 and jQuery) and a CSS file.
+    The page contains input fields for entering a password and selecting a wallet JSON file.
+    After clicking the "Decrypt Wallet" button, the script uses the Web3 library to decrypt the wallet using the provided password and the selected file.
+    The decrypted wallet address, private key, and keystore are then displayed in the respective textareas.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./sendTransaction.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Load Wallet and Send a Transaction</h1>
+        <button id="loadWalletButton">Load Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <!-- Select a wallet json file from the file system -->
+        <input type="file" id="keystoreFile" accept=".json">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <label for="checkCounter">Check the counter on <a href="https://sepolia.etherscan.io/address/0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08" >0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08</a></label>
+        <br/>
+        <button id="checkCounterButton">Check Counter</button>
+        <br/>
+        <label id="checkCounter">Current Value: </label>
+        <br/>
+        <h3 for="incrementCounter">Increment the counter on <a href="https://sepolia.etherscan.io/address/0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08" >0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08</a></h3>
+        <br/>
+        <button id="incrementCounterButton">Increment Counter</button>
+        <br/>
+
+        <!-- Put the transaction request details here -->
+        <label for="transactionRequest">Transaction Request: </label>
+        <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+        <br/>
+        <!-- Put the transaction result details here -->
+        <label for="transactionResult">Transaction Result: </label>
+        <textarea id="transactionResult" rows="5" cols="50"></textarea>
+
+        <br/>
+        <br/>
+        <br/>
+
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to Sepolia
+        var web3 = new Web3("https://rpc2.sepolia.org");
+
+        $("#loadWalletButton").click(function(){
+
+            // return if no password is entered
+            if ($("#password").val() == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a password");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            // load the contents of the file#
+            var file = $("#keystoreFile")[0].files[0];
+            // return if no file is selected
+            if (!file){
+                    // show the modal with the error
+                    $("#errorMessage").text("Please select a file");
+                    $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e){
+                var keystore = e.target.result;
+                var password = $("#password").val();
+                try {
+                    // decrypt the wallet
+                    var wallet = web3.eth.accounts.decrypt(keystore, password);
+                    // display the wallet address
+                    $("#walletAddress").val(wallet.address);
+                    // display the private key
+                    $("#privateKey").val(wallet.privateKey);
+                    // display the keystore
+                    $("#keystore").val(keystore);
+                } catch (error) {
+                    // show the modal with the error
+                    $("#errorMessage").text(error.message);
+                    $("#errorModal").css("display", "block");
+
+                }
+            };
+            reader.readAsText(file);
+
+
+        });
+
+        $("#checkCounterButton").click(function(){
+
+            // check the value in "counter" variable of the contract
+            var contractAddress = "0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            contract.methods.counter().call().then(function(result){
+                $("#checkCounter").text("Current Value: " + result);
+            });
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+
+        $("#incrementCounterButton").click(function(){
+            // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+            var privateKey = $("#privateKey").val();
+
+            // alert if no private key is entered
+            if (privateKey == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a private key");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+            var contractAddress = "0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            var transaction = contract.methods.incrementCounter();
+            var encodedABI = transaction.encodeABI();
+            var tx = {
+                from: wallet.address,
+                to: contractAddress,
+                gas: 2000000,
+                data: encodedABI
+            };
+            web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+                web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+                    $("#transactionRequest").val(JSON.stringify(tx));
+                    $("#transactionResult").val(JSON.stringify(receipt));
+                });
+            });
+
+        });
+        
+        const ABI = [
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "contractName",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "counter",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "name": "name",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "constant": false,
+        "inputs": [],
+        "name": "incrementCounter",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [],
+        "name": "decrementCounter",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+];
+</script>
+</html>
