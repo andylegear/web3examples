@@ -28,14 +28,6 @@ This file contains the license information for this project. It's important to r
 
 This Solidity file contains the code for a payable contract. It's a contract that can receive Ether payments. The contract includes functions for handling incoming payments and keeping track of the total amount of Ether received.
 
-### `README.md`
-
-This file contains the documentation for this project. It's a guide to understanding the project's structure, installation, usage, and contribution guidelines. It's the first file a new user or contributor should read.
-
-### `referenceProject/`
-
-This directory contains the HTML, CSS, and JavaScript files for a reference project. It's a fully functional project that serves as a reference for how to use the various features provided by this project. The reference project includes examples of how to integrate the features into a larger application.
-
 ### `sendPayableTransaction/`
 
 This directory contains the HTML and CSS files for a feature that sends a payable transaction. It provides a user-friendly interface for users to send Ether to a payable contract. The interface includes error handling for insufficient funds and invalid contract addresses.
