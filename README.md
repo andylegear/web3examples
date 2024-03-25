@@ -1,4 +1,4 @@
-# Project Title
+# Web3 Examples
 
 This project is a comprehensive suite of Ethereum-based tools and features, designed for developers who want to interact with the Ethereum blockchain. It includes basic and payable contracts, wallet creation and decryption, transaction handling, and a token contract. Each feature is encapsulated in its own directory, making the project modular and easy to navigate.
 
