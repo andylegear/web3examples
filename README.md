@@ -12,10 +12,6 @@ This Solidity file contains the code for a basic contract. It's a simple counter
 
 This directory contains the HTML and CSS files for a feature that checks the balance of a wallet. It provides a user-friendly interface for users to input their wallet address and see their current balance. The balance is displayed in Ether, and the interface updates in real-time.
 
-### `combined.txt`
-
-This file contains combined information from other files. It's used for debugging and reference purposes. It's a concatenation of the contents of all the files in the project, providing a quick way to search for specific pieces of code.
-
 ### `createWallet/`
 
 This directory contains the HTML and CSS files for a feature that creates a new wallet. It provides a user-friendly interface for users to create a new Ethereum wallet. The interface guides the user through the process, generating a private key and a public address.
