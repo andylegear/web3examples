@@ -1,0 +1,3998 @@
+Examples added
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[remote "origin"]
+	url = https://github.com/andylegear/web3examples.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+Unnamed repository; edit this file 'description' to name the repository.
+ref: refs/heads/main
+#!/bin/sh
+#
+# An example hook script to check the commit log message taken by
+# applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.  The hook is
+# allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "applypatch-msg".
+
+. git-sh-setup
+commitmsg="$(git rev-parse --git-path hooks/commit-msg)"
+test -x "$commitmsg" && exec "$commitmsg" ${1+"$@"}
+:
+#!/bin/sh
+#
+# An example hook script to check the commit log message.
+# Called by "git commit" with one argument, the name of the file
+# that has the commit message.  The hook should exit with non-zero
+# status after issuing an appropriate message if it wants to stop the
+# commit.  The hook is allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "commit-msg".
+
+# Uncomment the below to add a Signed-off-by line to the message.
+# Doing this in a hook is a bad idea in general, but the prepare-commit-msg
+# hook is more suited to it.
+#
+# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
+
+# This example catches duplicate Signed-off-by lines.
+
+test "" = "$(grep '^Signed-off-by: ' "$1" |
+	 sort | uniq -c | sed -e '/^[ 	]*1[ 	]/d')" || {
+	echo >&2 Duplicate Signed-off-by lines.
+	exit 1
+}
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use IPC::Open2;
+
+# An example hook script to integrate Watchman
+# (https://facebook.github.io/watchman/) with git to speed up detecting
+# new and modified files.
+#
+# The hook is passed a version (currently 2) and last update token
+# formatted as a string and outputs to stdout a new update token and
+# all files that have been modified since the update token. Paths must
+# be relative to the root of the working tree and separated by a single NUL.
+#
+# To enable this hook, rename this file to "query-watchman" and set
+# 'git config core.fsmonitor .git/hooks/query-watchman'
+#
+my ($version, $last_update_token) = @ARGV;
+
+# Uncomment for debugging
+# print STDERR "$0 $version $last_update_token\n";
+
+# Check the hook interface version
+if ($version ne 2) {
+	die "Unsupported query-fsmonitor hook version '$version'.\n" .
+	    "Falling back to scanning...\n";
+}
+
+my $git_work_tree = get_working_dir();
+
+my $retry = 1;
+
+my $json_pkg;
+eval {
+	require JSON::XS;
+	$json_pkg = "JSON::XS";
+	1;
+} or do {
+	require JSON::PP;
+	$json_pkg = "JSON::PP";
+};
+
+launch_watchman();
+
+sub launch_watchman {
+	my $o = watchman_query();
+	if (is_work_tree_watched($o)) {
+		output_result($o->{clock}, @{$o->{files}});
+	}
+}
+
+sub output_result {
+	my ($clockid, @files) = @_;
+
+	# Uncomment for debugging watchman output
+	# open (my $fh, ">", ".git/watchman-output.out");
+	# binmode $fh, ":utf8";
+	# print $fh "$clockid\n@files\n";
+	# close $fh;
+
+	binmode STDOUT, ":utf8";
+	print $clockid;
+	print "\0";
+	local $, = "\0";
+	print @files;
+}
+
+sub watchman_clock {
+	my $response = qx/watchman clock "$git_work_tree"/;
+	die "Failed to get clock id on '$git_work_tree'.\n" .
+		"Falling back to scanning...\n" if $? != 0;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub watchman_query {
+	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
+	or die "open2() failed: $!\n" .
+	"Falling back to scanning...\n";
+
+	# In the query expression below we're asking for names of files that
+	# changed since $last_update_token but not from the .git folder.
+	#
+	# To accomplish this, we're using the "since" generator to use the
+	# recency index to select candidate nodes and "fields" to limit the
+	# output to file names only. Then we're using the "expression" term to
+	# further constrain the results.
+	my $last_update_line = "";
+	if (substr($last_update_token, 0, 1) eq "c") {
+		$last_update_token = "\"$last_update_token\"";
+		$last_update_line = qq[\n"since": $last_update_token,];
+	}
+	my $query = <<"	END";
+		["query", "$git_work_tree", {$last_update_line
+			"fields": ["name"],
+			"expression": ["not", ["dirname", ".git"]]
+		}]
+	END
+
+	# Uncomment for debugging the watchman query
+	# open (my $fh, ">", ".git/watchman-query.json");
+	# print $fh $query;
+	# close $fh;
+
+	print CHLD_IN $query;
+	close CHLD_IN;
+	my $response = do {local $/; <CHLD_OUT>};
+
+	# Uncomment for debugging the watch response
+	# open ($fh, ">", ".git/watchman-response.json");
+	# print $fh $response;
+	# close $fh;
+
+	die "Watchman: command returned no output.\n" .
+	"Falling back to scanning...\n" if $response eq "";
+	die "Watchman: command returned invalid output: $response\n" .
+	"Falling back to scanning...\n" unless $response =~ /^\{/;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub is_work_tree_watched {
+	my ($output) = @_;
+	my $error = $output->{error};
+	if ($retry > 0 and $error and $error =~ m/unable to resolve root .* directory (.*) is not watched/) {
+		$retry--;
+		my $response = qx/watchman watch "$git_work_tree"/;
+		die "Failed to make watchman watch '$git_work_tree'.\n" .
+		    "Falling back to scanning...\n" if $? != 0;
+		$output = $json_pkg->new->utf8->decode($response);
+		$error = $output->{error};
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		# Uncomment for debugging watchman output
+		# open (my $fh, ">", ".git/watchman-output.out");
+		# close $fh;
+
+		# Watchman will always return all files on the first query so
+		# return the fast "everything is dirty" flag to git and do the
+		# Watchman query just to get it over with now so we won't pay
+		# the cost in git to look up each individual file.
+		my $o = watchman_clock();
+		$error = $output->{error};
+
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		output_result($o->{clock}, ("/"));
+		$last_update_token = $o->{clock};
+
+		eval { launch_watchman() };
+		return 0;
+	}
+
+	die "Watchman: $error.\n" .
+	"Falling back to scanning...\n" if $error;
+
+	return 1;
+}
+
+sub get_working_dir {
+	my $working_dir;
+	if ($^O =~ 'msys' || $^O =~ 'cygwin') {
+		$working_dir = Win32::GetCwd();
+		$working_dir =~ tr/\\/\//;
+	} else {
+		require Cwd;
+		$working_dir = Cwd::cwd();
+	}
+
+	return $working_dir;
+}
+#!/bin/sh
+#
+# An example hook script to prepare a packed repository for use over
+# dumb transports.
+#
+# To enable this hook, rename this file to "post-update".
+
+exec git update-server-info
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed
+# by applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-applypatch".
+
+. git-sh-setup
+precommit="$(git rev-parse --git-path hooks/pre-commit)"
+test -x "$precommit" && exec "$precommit" ${1+"$@"}
+:
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git commit" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message if
+# it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-commit".
+
+if git rev-parse --verify HEAD >/dev/null 2>&1
+then
+	against=HEAD
+else
+	# Initial commit: diff against an empty tree object
+	against=$(git hash-object -t tree /dev/null)
+fi
+
+# If you want to allow non-ASCII filenames set this variable to true.
+allownonascii=$(git config --type=bool hooks.allownonascii)
+
+# Redirect output to stderr.
+exec 1>&2
+
+# Cross platform projects tend to avoid non-ASCII filenames; prevent
+# them from being added to the repository. We exploit the fact that the
+# printable range starts at the space character and ends with tilde.
+if [ "$allownonascii" != "true" ] &&
+	# Note that the use of brackets around a tr range is ok here, (it's
+	# even required, for portability to Solaris 10's /usr/bin/tr), since
+	# the square bracket bytes happen to fall in the designated range.
+	test $(git diff --cached --name-only --diff-filter=A -z $against |
+	  LC_ALL=C tr -d '[ -~]\0' | wc -c) != 0
+then
+	cat <<\EOF
+Error: Attempt to add a non-ASCII file name.
+
+This can cause problems if you want to work with people on other platforms.
+
+To be portable it is advisable to rename the file.
+
+If you know what you are doing you can disable this check using:
+
+  git config hooks.allownonascii true
+EOF
+	exit 1
+fi
+
+# If there are whitespace errors, print the offending file names and fail.
+exec git diff-index --check --cached $against --
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git merge" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message to
+# stderr if it wants to stop the merge commit.
+#
+# To enable this hook, rename this file to "pre-merge-commit".
+
+. git-sh-setup
+test -x "$GIT_DIR/hooks/pre-commit" &&
+        exec "$GIT_DIR/hooks/pre-commit"
+:
+#!/bin/sh
+
+# An example hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+#
+# Information about the commits which are being pushed is supplied as lines to
+# the standard input in the form:
+#
+#   <local ref> <local oid> <remote ref> <remote oid>
+#
+# This sample shows how to prevent push of commits where the log message starts
+# with "WIP" (work in progress).
+
+remote="$1"
+url="$2"
+
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+
+while read local_ref local_oid remote_ref remote_oid
+do
+	if test "$local_oid" = "$zero"
+	then
+		# Handle delete
+		:
+	else
+		if test "$remote_oid" = "$zero"
+		then
+			# New branch, examine all commits
+			range="$local_oid"
+		else
+			# Update to existing branch, examine new commits
+			range="$remote_oid..$local_oid"
+		fi
+
+		# Check for WIP commit
+		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
+		if test -n "$commit"
+		then
+			echo >&2 "Found WIP commit in $local_ref, not pushing"
+			exit 1
+		fi
+	fi
+done
+
+exit 0
+#!/bin/sh
+#
+# Copyright (c) 2006, 2008 Junio C Hamano
+#
+# The "pre-rebase" hook is run just before "git rebase" starts doing
+# its job, and can prevent the command from running by exiting with
+# non-zero status.
+#
+# The hook is called with the following parameters:
+#
+# $1 -- the upstream the series was forked from.
+# $2 -- the branch being rebased (or empty when rebasing the current branch).
+#
+# This sample shows how to prevent topic branches that are already
+# merged to 'next' branch from getting rebased, because allowing it
+# would result in rebasing already published history.
+
+publish=next
+basebranch="$1"
+if test "$#" = 2
+then
+	topic="refs/heads/$2"
+else
+	topic=`git symbolic-ref HEAD` ||
+	exit 0 ;# we do not interrupt rebasing detached HEAD
+fi
+
+case "$topic" in
+refs/heads/??/*)
+	;;
+*)
+	exit 0 ;# we do not interrupt others.
+	;;
+esac
+
+# Now we are dealing with a topic branch being rebased
+# on top of master.  Is it OK to rebase it?
+
+# Does the topic really exist?
+git show-ref -q "$topic" || {
+	echo >&2 "No such branch $topic"
+	exit 1
+}
+
+# Is topic fully merged to master?
+not_in_master=`git rev-list --pretty=oneline ^master "$topic"`
+if test -z "$not_in_master"
+then
+	echo >&2 "$topic is fully merged to master; better remove it."
+	exit 1 ;# we could allow it, but there is no point.
+fi
+
+# Is topic ever merged to next?  If so you should not be rebasing it.
+only_next_1=`git rev-list ^master "^$topic" ${publish} | sort`
+only_next_2=`git rev-list ^master           ${publish} | sort`
+if test "$only_next_1" = "$only_next_2"
+then
+	not_in_topic=`git rev-list "^$topic" master`
+	if test -z "$not_in_topic"
+	then
+		echo >&2 "$topic is already up to date with master"
+		exit 1 ;# we could allow it, but there is no point.
+	else
+		exit 0
+	fi
+else
+	not_in_next=`git rev-list --pretty=oneline ^${publish} "$topic"`
+	/usr/bin/perl -e '
+		my $topic = $ARGV[0];
+		my $msg = "* $topic has commits already merged to public branch:\n";
+		my (%not_in_next) = map {
+			/^([0-9a-f]+) /;
+			($1 => 1);
+		} split(/\n/, $ARGV[1]);
+		for my $elem (map {
+				/^([0-9a-f]+) (.*)$/;
+				[$1 => $2];
+			} split(/\n/, $ARGV[2])) {
+			if (!exists $not_in_next{$elem->[0]}) {
+				if ($msg) {
+					print STDERR $msg;
+					undef $msg;
+				}
+				print STDERR " $elem->[1]\n";
+			}
+		}
+	' "$topic" "$not_in_next" "$not_in_master"
+	exit 1
+fi
+
+<<\DOC_END
+
+This sample hook safeguards topic branches that have been
+published from being rewound.
+
+The workflow assumed here is:
+
+ * Once a topic branch forks from "master", "master" is never
+   merged into it again (either directly or indirectly).
+
+ * Once a topic branch is fully cooked and merged into "master",
+   it is deleted.  If you need to build on top of it to correct
+   earlier mistakes, a new topic branch is created by forking at
+   the tip of the "master".  This is not strictly necessary, but
+   it makes it easier to keep your history simple.
+
+ * Whenever you need to test or publish your changes to topic
+   branches, merge them into "next" branch.
+
+The script, being an example, hardcodes the publish branch name
+to be "next", but it is trivial to make it configurable via
+$GIT_DIR/config mechanism.
+
+With this workflow, you would want to know:
+
+(1) ... if a topic branch has ever been merged to "next".  Young
+    topic branches can have stupid mistakes you would rather
+    clean up before publishing, and things that have not been
+    merged into other branches can be easily rebased without
+    affecting other people.  But once it is published, you would
+    not want to rewind it.
+
+(2) ... if a topic branch has been fully merged to "master".
+    Then you can delete it.  More importantly, you should not
+    build on top of it -- other people may already want to
+    change things related to the topic as patches against your
+    "master", so if you need further changes, it is better to
+    fork the topic (perhaps with the same name) afresh from the
+    tip of "master".
+
+Let's look at this example:
+
+		   o---o---o---o---o---o---o---o---o---o "next"
+		  /       /           /           /
+		 /   a---a---b A     /           /
+		/   /               /           /
+	       /   /   c---c---c---c B         /
+	      /   /   /             \         /
+	     /   /   /   b---b C     \       /
+	    /   /   /   /             \     /
+    ---o---o---o---o---o---o---o---o---o---o---o "master"
+
+
+A, B and C are topic branches.
+
+ * A has one fix since it was merged up to "next".
+
+ * B has finished.  It has been fully merged up to "master" and "next",
+   and is ready to be deleted.
+
+ * C has not merged to "next" at all.
+
+We would want to allow C to be rebased, refuse A, and encourage
+B to be deleted.
+
+To compute (1):
+
+	git rev-list ^master ^topic next
+	git rev-list ^master        next
+
+	if these match, topic has not merged in next at all.
+
+To compute (2):
+
+	git rev-list master..topic
+
+	if this is empty, it is fully merged to "master".
+
+DOC_END
+#!/bin/sh
+#
+# An example hook script to make use of push options.
+# The example simply echoes all push options that start with 'echoback='
+# and rejects all pushes when the "reject" push option is used.
+#
+# To enable this hook, rename this file to "pre-receive".
+
+if test -n "$GIT_PUSH_OPTION_COUNT"
+then
+	i=0
+	while test "$i" -lt "$GIT_PUSH_OPTION_COUNT"
+	do
+		eval "value=\$GIT_PUSH_OPTION_$i"
+		case "$value" in
+		echoback=*)
+			echo "echo from the pre-receive-hook: ${value#*=}" >&2
+			;;
+		reject)
+			exit 1
+		esac
+		i=$((i + 1))
+	done
+fi
+#!/bin/sh
+#
+# An example hook script to prepare the commit log message.
+# Called by "git commit" with the name of the file that has the
+# commit message, followed by the description of the commit
+# message's source.  The hook's purpose is to edit the commit
+# message file.  If the hook fails with a non-zero status,
+# the commit is aborted.
+#
+# To enable this hook, rename this file to "prepare-commit-msg".
+
+# This hook includes three examples. The first one removes the
+# "# Please enter the commit message..." help message.
+#
+# The second includes the output of "git diff --name-status -r"
+# into the message, just before the "git status" output.  It is
+# commented because it doesn't cope with --amend or with squashed
+# commits.
+#
+# The third example adds a Signed-off-by line to the message, that can
+# still be edited.  This is rarely a good idea.
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+
+/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
+
+# case "$COMMIT_SOURCE,$SHA1" in
+#  ,|template,)
+#    /usr/bin/perl -i.bak -pe '
+#       print "\n" . `git diff --cached --name-status -r`
+# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
+#  *) ;;
+# esac
+
+# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
+# if test -z "$COMMIT_SOURCE"
+# then
+#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
+# fi
+#!/bin/sh
+
+# An example hook script to update a checked-out tree on a git push.
+#
+# This hook is invoked by git-receive-pack(1) when it reacts to git
+# push and updates reference(s) in its repository, and when the push
+# tries to update the branch that is currently checked out and the
+# receive.denyCurrentBranch configuration variable is set to
+# updateInstead.
+#
+# By default, such a push is refused if the working tree and the index
+# of the remote repository has any difference from the currently
+# checked out commit; when both the working tree and the index match
+# the current commit, they are updated to match the newly pushed tip
+# of the branch. This hook is to be used to override the default
+# behaviour; however the code below reimplements the default behaviour
+# as a starting point for convenient modification.
+#
+# The hook receives the commit with which the tip of the current
+# branch is going to be updated:
+commit=$1
+
+# It can exit with a non-zero status to refuse the push (when it does
+# so, it must not modify the index or the working tree).
+die () {
+	echo >&2 "$*"
+	exit 1
+}
+
+# Or it can make any necessary changes to the working tree and to the
+# index to bring them to the desired state when the tip of the current
+# branch is updated to the new commit, and exit with a zero status.
+#
+# For example, the hook can simply run git read-tree -u -m HEAD "$1"
+# in order to emulate git fetch that is run in the reverse direction
+# with git push, as the two-tree form of git read-tree -u -m is
+# essentially the same as git switch or git checkout that switches
+# branches while keeping the local changes in the working tree that do
+# not interfere with the difference between the branches.
+
+# The below is a more-or-less exact translation to shell of the C code
+# for the default behaviour for git's push-to-checkout hook defined in
+# the push_to_deploy() function in builtin/receive-pack.c.
+#
+# Note that the hook will be executed from the repository directory,
+# not from the working tree, so if you want to perform operations on
+# the working tree, you will have to adapt your code accordingly, e.g.
+# by adding "cd .." or using relative paths.
+
+if ! git update-index -q --ignore-submodules --refresh
+then
+	die "Up-to-date check failed"
+fi
+
+if ! git diff-files --quiet --ignore-submodules --
+then
+	die "Working directory has unstaged changes"
+fi
+
+# This is a rough translation of:
+#
+#   head_has_history() ? "HEAD" : EMPTY_TREE_SHA1_HEX
+if git cat-file -e HEAD 2>/dev/null
+then
+	head=HEAD
+else
+	head=$(git hash-object -t tree --stdin </dev/null)
+fi
+
+if ! git diff-index --quiet --cached --ignore-submodules $head --
+then
+	die "Working directory has staged changes"
+fi
+
+if ! git read-tree -u -m "$commit"
+then
+	die "Could not update working tree to new HEAD"
+fi
+#!/bin/sh
+
+# An example hook script to validate a patch (and/or patch series) before
+# sending it via email.
+#
+# The hook should exit with non-zero status after issuing an appropriate
+# message if it wants to prevent the email(s) from being sent.
+#
+# To enable this hook, rename this file to "sendemail-validate".
+#
+# By default, it will only check that the patch(es) can be applied on top of
+# the default upstream branch without conflicts in a secondary worktree. After
+# validation (successful or not) of the last patch of a series, the worktree
+# will be deleted.
+#
+# The following config variables can be set to change the default remote and
+# remote ref that are used to apply the patches against:
+#
+#   sendemail.validateRemote (default: origin)
+#   sendemail.validateRemoteRef (default: HEAD)
+#
+# Replace the TODO placeholders with appropriate checks according to your
+# needs.
+
+validate_cover_letter () {
+	file="$1"
+	# TODO: Replace with appropriate checks (e.g. spell checking).
+	true
+}
+
+validate_patch () {
+	file="$1"
+	# Ensure that the patch applies without conflicts.
+	git am -3 "$file" || return
+	# TODO: Replace with appropriate checks for this patch
+	# (e.g. checkpatch.pl).
+	true
+}
+
+validate_series () {
+	# TODO: Replace with appropriate checks for the whole series
+	# (e.g. quick build, coding style checks, etc.).
+	true
+}
+
+# main -------------------------------------------------------------------------
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = 1
+then
+	remote=$(git config --default origin --get sendemail.validateRemote) &&
+	ref=$(git config --default HEAD --get sendemail.validateRemoteRef) &&
+	worktree=$(mktemp --tmpdir -d sendemail-validate.XXXXXXX) &&
+	git worktree add -fd --checkout "$worktree" "refs/remotes/$remote/$ref" &&
+	git config --replace-all sendemail.validateWorktree "$worktree"
+else
+	worktree=$(git config --get sendemail.validateWorktree)
+fi || {
+	echo "sendemail-validate: error: failed to prepare worktree" >&2
+	exit 1
+}
+
+unset GIT_DIR GIT_WORK_TREE
+cd "$worktree" &&
+
+if grep -q "^diff --git " "$1"
+then
+	validate_patch "$1"
+else
+	validate_cover_letter "$1"
+fi &&
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
+then
+	git config --unset-all sendemail.validateWorktree &&
+	trap 'git worktree remove -ff "$worktree"' EXIT &&
+	validate_series
+fi
+#!/bin/sh
+#
+# An example hook script to block unannotated tags from entering.
+# Called by "git receive-pack" with arguments: refname sha1-old sha1-new
+#
+# To enable this hook, rename this file to "update".
+#
+# Config
+# ------
+# hooks.allowunannotated
+#   This boolean sets whether unannotated tags will be allowed into the
+#   repository.  By default they won't be.
+# hooks.allowdeletetag
+#   This boolean sets whether deleting tags will be allowed in the
+#   repository.  By default they won't be.
+# hooks.allowmodifytag
+#   This boolean sets whether a tag may be modified after creation. By default
+#   it won't be.
+# hooks.allowdeletebranch
+#   This boolean sets whether deleting branches will be allowed in the
+#   repository.  By default they won't be.
+# hooks.denycreatebranch
+#   This boolean sets whether remotely creating branches will be denied
+#   in the repository.  By default this is allowed.
+#
+
+# --- Command line
+refname="$1"
+oldrev="$2"
+newrev="$3"
+
+# --- Safety check
+if [ -z "$GIT_DIR" ]; then
+	echo "Don't run this script from the command line." >&2
+	echo " (if you want, you could supply GIT_DIR then run" >&2
+	echo "  $0 <ref> <oldrev> <newrev>)" >&2
+	exit 1
+fi
+
+if [ -z "$refname" -o -z "$oldrev" -o -z "$newrev" ]; then
+	echo "usage: $0 <ref> <oldrev> <newrev>" >&2
+	exit 1
+fi
+
+# --- Config
+allowunannotated=$(git config --type=bool hooks.allowunannotated)
+allowdeletebranch=$(git config --type=bool hooks.allowdeletebranch)
+denycreatebranch=$(git config --type=bool hooks.denycreatebranch)
+allowdeletetag=$(git config --type=bool hooks.allowdeletetag)
+allowmodifytag=$(git config --type=bool hooks.allowmodifytag)
+
+# check for no description
+projectdesc=$(sed -e '1q' "$GIT_DIR/description")
+case "$projectdesc" in
+"Unnamed repository"* | "")
+	echo "*** Project description file hasn't been set" >&2
+	exit 1
+	;;
+esac
+
+# --- Check types
+# if $newrev is 0000...0000, it's a commit to delete a ref.
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+if [ "$newrev" = "$zero" ]; then
+	newrev_type=delete
+else
+	newrev_type=$(git cat-file -t $newrev)
+fi
+
+case "$refname","$newrev_type" in
+	refs/tags/*,commit)
+		# un-annotated tag
+		short_refname=${refname##refs/tags/}
+		if [ "$allowunannotated" != "true" ]; then
+			echo "*** The un-annotated tag, $short_refname, is not allowed in this repository" >&2
+			echo "*** Use 'git tag [ -a | -s ]' for tags you want to propagate." >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,delete)
+		# delete tag
+		if [ "$allowdeletetag" != "true" ]; then
+			echo "*** Deleting a tag is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,tag)
+		# annotated tag
+		if [ "$allowmodifytag" != "true" ] && git rev-parse $refname > /dev/null 2>&1
+		then
+			echo "*** Tag '$refname' already exists." >&2
+			echo "*** Modifying a tag is not allowed in this repository." >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,commit)
+		# branch
+		if [ "$oldrev" = "$zero" -a "$denycreatebranch" = "true" ]; then
+			echo "*** Creating a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,delete)
+		# delete branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/remotes/*,commit)
+		# tracking branch
+		;;
+	refs/remotes/*,delete)
+		# delete tracking branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a tracking branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	*)
+		# Anything else (is there anything else?)
+		echo "*** Update hook: unknown type of update to ref $refname of type $newrev_type" >&2
+		exit 1
+		;;
+esac
+
+# --- Finished
+exit 0
+DIRC      eşÂ#ØeşÂ#Ø          ¤          D—Hüğ@f¥mJ³Ó5aih´…GB LICENSE   eşÂ[(eşÂ[(          ¤           (M&oW£QÊc‡ZŞêëÏŸPYbì 	README.md eşâ(!1"Ìeşêt- o@         ¤          ]gĞœÚ!7˜7Z= ÿÔ‰¹é>K basicContract/Counter.sol eşÑ‰'V¨HeşÑ'%ª         ¤          VR×s›Ş!»Œ–Â
+HçV9à>hÍ checkBalance/checkBalance.css     eşÑ‰'u+œeşàÄ9"ç         ¤          +˜£;şÎ4Ï
+èl=uë¨7-£1 checkBalance/index.html   eşÅéxteşÇÒ8VÍ€         ¤          óH*ı	øs|`ø/ÿÔ“È|“yù createWallet/createWallet.css     eşÂU´]@eşÉ{*2(         ¤          ©‡ ºŸ™Y‹€IÎó+8…kÄ createWallet/index.html   eşÉÜ”xeşÑ'%ª         ¤          VR×s›Ş!»Œ–Â
+HçV9à>hÍ decryptWallet/decryptWallet.css   eşÉÜ*öÀeşÑH"V°         ¤          gWY”;ZlAy×n–(lWÎÖ×ğ decryptWallet/index.html  eşêa6ıUDeşõï55Ø0         ¤          ¹xÁüà€dæóÌ3ìİO+¶' ¡» $payableContract/AndyTokenPayable.sol      eşìŞ$1ueş÷#¼mD         ¤          ,îp¸3¯ğ%j\¤(	ßrOÂ•fÏd !sendPayableTransaction/index.html eşìŞ$@—@eşÑ'%ª         ¤          VR×s›Ş!»Œ–Â
+HçV9à>hÍ 1sendPayableTransaction/sendPayableTransaction.css eşä?›øteşé-Dğ         ¤          !ıÈá*Díº*}Xö—Ş<:æ¨æ… sendTransaction/index.html        eşä?Œ¶4eşÑ'%ª         ¤          VR×s›Ş!»Œ–Â
+HçV9à>hÍ #sendTransaction/sendTransaction.css       eşÙJnhÈeşİ„ 6¸         ¤          •€ƒO2İ¦÷sRÇ}Q1:å¶/ tokenContract/AndyToken.sol       TREE  U 15 8
+ö%[¢% ïÎÇŒ$Àj½bGÒcheckBalance 2 0
+¦ŞIéâ¯8ìÏ3ø7ÁÈHcreateWallet 2 0
+zú"!{;$ 	Ğš,°ÿ´ì¸basicContract 1 0
+KusR“]®Á;ØÙ–Ò:decryptWallet 2 0
+€íÛ*‘{æziw*+È`tokenContract 1 0
+-ƒX¿ÙQ——¡“HM3E±­ó$payableContract 1 0
+¿ÁĞ-Öe-ƒ>¡¹8¢Ù@L6psendTransaction 2 0
+3ó†¸~F?¡¦/._ÆŞÿ˜ UsendPayableTransaction 2 0
+tYGÇÉ¾ærDämÍ¾›)ìó;êõ™ÜD»xAuõ³Vy¦åƒš# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project mostly in C, the following would be a good set of
+# exclude patterns (uncomment them if you want to use them):
+# *.[oa]
+# *~
+0000000000000000000000000000000000000000 dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711194628 +0000	clone: from https://github.com/andylegear/web3examples.git
+dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a 7bd33728ad40ad4e0b4e293f13040544020e3960 Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711208386 +0000	commit: Examples added
+0000000000000000000000000000000000000000 dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711194628 +0000	clone: from https://github.com/andylegear/web3examples.git
+dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a 7bd33728ad40ad4e0b4e293f13040544020e3960 Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711208386 +0000	commit: Examples added
+0000000000000000000000000000000000000000 dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711194628 +0000	clone: from https://github.com/andylegear/web3examples.git
+dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a 7bd33728ad40ad4e0b4e293f13040544020e3960 Andrew Le Gear <andrew.legear@horizon-globex.ie> 1711208392 +0000	update by push
+x+)JMU01d040031QpÌK©ÉÏNÍÓ+ÎÏahhö7º»ì{q4ÇñZÖ@C«§Ûô……Cx+)JMU°0e040031QÈÌKI­ĞË(ÉÍa8ñPËåí.­ÚˆoÓïÉØX=[ñ¬±ªª85/%¤(1¯81¹$3?O/¹¸˜!èzñì{Š»¥{¦âòxfùÀ.ã, r%½xÍRMoÓ@åœ_1R…J«8vR°=E$„¨Äy¿l/¬w¬İu«â¿3c'!=Àò‡fvÆï½ycåQÁÛWo•×ğşã§w_¶÷”Z”Æ>”;«nì^v½·©ÔÑÊl¿Iïm~’¬tJp].„±í{?‚%õ&âhô¹®ĞŒğ¸€³b1\Ô¾n©XcÈE-;çG—w8Dg#|¶»Ë%²%t0õRÛÛÅÏ‰÷Î†Lm¹µÄGaÈÌ¸âXº@æ5.õ^líí¹¾)»z$Ó'ôÃ%é]
+—m—Î[ëš6XWÕC{$ßÃ#ãR+î #åZF3‹à€ù©£˜;T°é÷ğ’Ø(ù¢ZÂá^­¯¸_óè-#9c˜,œ£	ìäğÉÄªz­êšÕŸlÓ^ãBÃ²‰pC/nRE”Æ4$iù}* ` w	jˆ	£€[ÌGÿ¶"v)agGj&oñ#Áv26.
+iÚNdÒz³İgI?ßäáÎ™Ü
+¸©³’³uÌêŸLÊrMv$ôÎÀ…Özò}¥røÓ_úßüƒâ0x+)JMU0¶d040031QpÎ/Í+I-Ò+ÎÏaHç¸0§ï–¢ùó(Ûÿ¯tî|iç m½xÍSßoÓ@æ¹…¥iLM“vC”ÛS5@B	$/¹Krp9G—K›2íŸ];<¡´‘}vìÏŸ¿K-¦°\½]¾ˆ/áıÇOï¾l¾}g"Vzïtz¥;YÕV7qæµú»´V‡g‘5\Æ³ÕØÔµİƒ„Tf?­S¡EÏñÕîfpŒú €³|ÅÏst!Êeeì^ÀÅ-¶ŞhŸõîb£7‡
+6µÌôÍì¾ï{«] ´PjêG¦ÜqÁ¶4"ÜW™¦¶’ÊæVwÜëGÛ“ï	Eÿ‰€¬/Ã!iMá"tÕ—Úe°L’m95ß(Å#cM)î  ù™ôj Á÷§ŒhÈÀªîàšş¾HåËdão±|5ÕıöVså6t=…ƒÕ;0| 1IŞ¤yÎè´n-•2®`ØÔpE/NJÑ+í#/•iiHÂòx*À¡#v©Tëôj4L1ıÛŠ˜¥+¼8BÓs3ÙwT¶’¾0.J‘¦­Ä“Öt$‰¯çpgT(\%çŒähú“I9ãïC.‰­Qp–eYÏû"î9•şÇ/*TÒÊ|Za		ßtZ1-¿"ã”îHìY“¦6Ö£52MJJuïãVûÜâN€löTÿ¦H’ö¤lõŸ.şSñ_S_éaœéb>·\óÃ•íĞ8¯ÏxZ8<%=n}½^óçã¬kõş'’`xµWmo7Şçü
+Uˆïd¶Ög k¬ÛºvK†böA¾£íKdé&Év"ÿ}$u¯‰³%f ˆ%Q$õ|HÏµ‹¯Ÿ}{úÅôÉd"~.W¥ß_¾ûI,J…VäT ¡Äæ¢RKëD¹ÛW¡4K:QZCHXÑÛ J“ëM^„9x¯Ü^èrî”+qôæ§B™B\ı²·ów%^]\°ù¨éo³½Üš JãQqµ	(ºğì˜ .úP)ïwÖ¬Êƒ†|àœøáâıÏ=åg¼)r]æ×tŸ<•¯ã›ÄG~óMÖó¡Ï]Y%>‹__´'”j<X6Â²æÊÙmY œ'ÉftOõîÙµ6Ü¯u©¢pã±¨\¹¥p\Ãş˜ŸŠ_|°„¨Òˆ¢ô•V{¼\öoVÇàS@Aå“£Édv4}òúı«Ëß?¼«°Ö¸¦B+³Ì$I Švº† D¾RÎCÈäo—ç“oP‚’'µ†LnKØUÖ)(l LîÊ"¬²¶e^£ke(•ø\iÈN’g*ÊÈ·1ØùĞä3¬Ãá]ÉU•‘¦ya’+_€.·.1Òå*DÄÁfbòâiŠà„¸X—$.gÓ4*«5ß¶3´NŞ½øGÔ•ú”,­]jPUé“Ü®SÚK1Q|zõåzzš<ONêEò 'övãÚÊèìëÒ\:“>ì5ø b¾r°Èd’Ö	39É=¾3Ê aÖdzSºÓ4îMÓñéÜûx‡_ô.Eµ(zÒ“ˆÕ"Ê"“ëßqÉözs9Ê÷ògşš»q¬«˜xö&AØW˜pMMI6İ­°rXY]€Ëä"
+dªæ˜Pş{qAõSÄêÉ“¦–ÜÄ•·†«T,œ]sj2Sz,?X·q¹ã	E×šJ=ç•çPaq`Zª4ºHŸéÜ¥·Wİ¡VsĞä<V³ÔY$9‹°Šzıbš²èmMÑZiˆ€AªÎî|&ŸSkú‚µ‰	R3Ç½{®Õ$…ØÊÙ‡š°pñ8§zJş»Gör†~D¾¤0<Î£VÉCüébFÙôÆ9lšïl¡ô0UŠrË! às„]c/Ëäš¤{™ÁÙAòıóIÍ²·äXÖWÊ°ò\[Cå¼%g_…rş%r Êv¡mÓ¤ê9Gm|‰u2M«NrŠŒºÅ>‘F¾8šöÉ”Ô¤i7AØÑqŠìïƒ29´ m•‹';A¤?¿<jÏ¿É§‡Xeœp-6œ5£ñçîRmŞAØ8b!Œí ' h<JÈXCrœl•E–	)Q;	õ?ø>¿²;&˜Ø•aÅKé¤=F»tœPmäì¢W=ª’ˆCß }ïtp 
+Şdİøå±smóëC7#C7w ÓVáì‡ôXg—vÑRŞÓ;9&ÂŒ½jj„InüÇ³?:ôøehaÄ…U`Lšh`ƒ‚ò„$àOp<:CÇ!z‚ Ã‡ *ùAĞâ¬†LÄ²8GO~å*²ß|¢XbG.m=‚Œô6qBÍàH¸ÄùçÄCÅd€ä›z@ùCåq÷RÀ‰ÿóÀÇÆWŒV]ÊœR±ù”$ÃñÍò‡ó\‚ÓnLğI­eÔ¼§ãúGÀ-tú–ãpÜ³,êÙú ôÖawŒ|÷’úêÃÌõF÷{mõšŞÀP·ÿ0[$÷jj~k–´ßˆ\…|%FLZãûƒú8¤˜t46,A¶”`c¢†sÀ¥áİ«¼;Üvn†¹[Wı;ó—DÌL<Ø‹Ú[7èR»ÀlşH¿ºˆ-ñ×aı›	Óˆ)7U1ú4>Æ-˜…¸I´×	‚^{¾ÛÏnáİAvÏ³5¶"g	/lÑMkÆÁ~íı†—2x±ƒ0D;óA¨ˆŠ¥bêŞO¨BŠ"g@ÿŞµC‡zôİ=Ÿû‰zhšËi¶b4šô y…G]]«ºÍ2IÈVH†9deá•Ÿ…­Æf×OZÂaº£Ú ;üQCÒÃö¤÷ú°“L6O£ÙĞ§‹ÄOÎpz§Bäb¬Óo¹/¶ˆ:”¬	A£´Ê(äT</>ñƒ/HYşFêoÄù| ¶7Ùh?xÕZmoÛ8¾¯É¯`µ‹«$RŞ›dí išâz»½ö6>‡ÅbAK´­F–t"mÇ(òßofHJ¢,7v{İÛ5ĞÆ"‡óÊyfHy˜dCvxxğâä/½gûûl—Ág0‰%ûÛàíOl'‚ÁÃLŠˆ©Œ……àJ0ÎbÈr>l”,a±ÌUœq†'‰P>1z£Xœ†É,’©‰`©…”¼X²$¼ˆa¼óAO#öñŸ3Q,»ô³›»;¯9`5É³Tñ8•À8Ÿ) I$I‘*Qhr.å"+"b%E"BG9ö÷»wÿ¨1¿ÁJ&qxëQSï•¶‰} s<6œ)•¥{4)Ã"Î:E›Eh‹–è%ã¢Õî ZË9/²y;%Q¦VfĞë•Ù†Œ^<Š
+pãË‹xá¸Ë=2¾H• ø,SÅ2OøÇ)é+stÇÄƒB.ıİıı«İŞ³Wïnÿ~Ë&jšÀ3şa	OÇ}O¤]Q`{S¡8'¼Bõ½^ïŸn=•ò©è{óX,ò¬PÃ°A€úŞ"Ô¤‰yŠ}zØÕbód_†<ıCÿÀ²ÂùFo RŞq4êLM8dö½‰R¹¼‚0Jı2I</üT¨`<	x¤³i ›÷fpÒÓÉ½«^ ™ÎMùz‡šÍ»dŸÕ€äş8ËÆ‰ày,ı0›8ÀF‘ÁÇÿà^ıSÿĞ<ø(±ÌfE™•ü$NïY!’¾'Õ2r"ø|RˆQßó)Òè=_òa"O%‡ğg©J0X{PÅ*WvËÛîz|w·èĞ÷†Y´ÔkÈó“Ã«Ÿ2™$¡-xÂ Œ<VLkkuB±8ê{	ğĞyö’²Ì«síš²¶Ãr-ï)ë­²U:Ù¨†%Ô2‡İhÎ#¡Õ$H(&Y‰¢ïİ"Š€vš„`vş(–ì“Ë8Ø£&w„/%ò±2K)…Ù¨È¦´o	F%ä¦˜–A[Q‰´j6_ÓC‘CæÀÍ0q!~zÃ"h>U“	Š•‡”#»Ö¨á]iO3ó|Ùˆ´ÉIË )%Èi.+VdÙ÷N1½ü‰›ÆÀÊZ5Õ‚o½«÷Íàa;¥jL¾^#ë{ï
+ôĞ`ŠaØN£’É&úT1k	h†É±æp¶d÷"•6U^Î–LèıvH[@Š³7`1QŠ<KbîÖ¦~œ¦˜£ã“.†âŒGĞŒÎ£Ãããğüğä,üˆ‡gáÅ(äçgƒª1FØÿmÕáŞ»Ú|m/à°C&Çk÷F>céLĞ¹‹ÉÊ§Ù,UX‹s^á4eF„M4È «À&‚ˆt6ŠBg¡öX<¬ˆXIË*¨ï¡SÁ5¿ ×P¤‚fú™D2¬M.8Ôò¤¶ğg½Î»ªA+3ƒ—l5›m:Rş¶ğÙd‹’ãÜİ¹Ş,9K¾Ä*\Ö4
+Ç¶³‰¸<eR×¦–§İŠ-¾-
+èwßfOÜXEñœ,€æhCûŞ©k„œ‰ôõù}Ó 5èˆVæ<%æa’Iá2§!ïê¯*
+ù´/@[%.ÇO/¯)‡øªX/È+Ê4Cshñ]áw{õ>YAÕü§b€chÜ¤âi(°½ƒŞ^A›	)w§q¦ôÜœš¼€Ã&®S6jEù™²bìu¨|ş}Çûn¥9èúÔ©wF³”™N÷SµÂ¨Z5+Ài#–"˜Ó dè ¢R7¤ªJ²t^×Ÿó¤Óeı>ó<àDõøBN²¥4E—-b5¡GŠÿÊä®w†q~×Ç´ìxï¡9”BkUk:Ğ	uø½âAû	¼ eÇ3ı½·Ç¼a’…÷m+µ3\+.C?“	f'J–èû’ïu0 8Êú¤•­vÔ®t9øÕÇI	_\™à6'.ÄbbÏ=Ê3¤hñ?ºcë¸>lƒÖ‚Û\é2ù@×Â‘ZQp.fËkĞägè46…&ó³”"×ge>´¹ùÚ8gáëîÃq0Ö‰ô6L˜í£MÕE
+öŸœ("+ü@´VÅ­”(Xw™ –jĞ®øĞcA—¾áÒ±¶À!ØdwÃ;Z®–¬ÏÀ´™kÓõ´j€‰æö¹ô˜o–n&®vB_+«Ö¾:‚ªñÍdY—¬d	L íc÷GrNX‡@«»>¨ÛÁ Æ¤‚17I’E‹S‹JîÚ§2oÅÎÈ£»wM&áŸk9@`&àBT®z•ÊØÍğr[:¸2WG ˜)ëQf‡îÔw(×DDE¢\.¨•òÕzÖğwå²5f§Yê •£,®n¶Ò«"İ´áŞ®S(—d ÔÃ\¦Ì£<Ä5Æ+[&°lĞ¹c¸DO#}'ãqŠ]A­ñ­_…•÷W¥s0Î>ú4ø#œºu•©Ò¡ g(×G\9êª_]áæºÂ_±ı?”ûJÅ¶bódÜ¿¦â?³•[ÙµßN5ÖÈOğ|}º!†ùàáüÕÍÉğúæôâö€]œ^ÜÏ£—§/.®_‰ÓÓóÛ“/N ¢Z–—¹¡€ø{›Ÿ0=7µëü€‘í\ñìß˜Û¹~ù²Õ<©‘O}÷KzÀ,5É"éÛ$kÖi\*Ò0ƒ;_JÔøøzÆÛV™S¬ŞÿõÓªiPWMUÀßÍeL(¼ˆº´7ó¦€í9~G*•]–V/¬¹¼dGôY¸â—5kW)I@¼‚)8øú*û â6o=§Û‰ç]l@	Bã8Z âÂ‰p§æFÇ wç5Ê”äK}ÏWå  spI?Æ;v‡Q•néò5t«-öÍ›€Ìá÷‚Èf¦W\× {™å2«­BmM“z(ß ŠÂ‰JVuhÒÀ<xhi¯KÖãwàu¾v¥_ğEm¼hçyoxàİÈó½ª5C-‚pÓ¡ùªòŸ½İĞ;ßÓøRá[x´‹º´DøYáB÷ ­L¬:õ‚®™èÿa»À¡jKınÇ-İuÂÍW_…ß±>×Çœz]Ÿ,© œàªHÃÇ/»;Ÿvwv<ºÈ’Ş%ƒ¢A¸¾Ny2€ë,˜‚÷è<oIv<|+ƒ£¿Ñ3ˆ7_5R¤|¤)”²9K¹œ³ÄJÚ–é,NÕ¹]\ª	İ~<å‰´–«¦~RS$;:=³«-[óºén–çÉÒNÖYãbÿıŠ® 7Â{¶·3Å‡q«%ºš.ƒDÄÂ³(TÅ,„WÀ=IÑâ@¿„[IØLÄwM#ñ " TÅŒèZ¢`PÜªomË)4g¾R%KÛâ°/—¯S8¦~¬Òü³Ö„ŒªFS”¥uCe=qã›V¸y#GÛèˆ94‚õ¸¬‰€›EÖÆ¯VÄö.pÙZlu¹ÛÎZNÖ
+ml6Sğnü)hfUºZ‹šB‰Æõï©`o$Úı­3ËJ¶İÓŠk°5û>/-YƒjkBÕ"ÎcÜ3›çÔ72ÕÉ‘É9ïåß	í°¯İ"0_v*û1¿ÎQVnŠoƒsÛ"½›¦ÔzmwÔ:½¾¦hmÛ!lËM*!€¯ùğ³„l¯V0ÿ38½¦f6ÓÓ’=Y»ğ'JZ¾Mÿu	1w×MmV¸–åÃ«õP¼ı™|ã†×iŞ7L'ÛÊ1 é9Mäú­¥+Ù6²®öj7«³í­¦ê†êë^;Šmè÷?’ö*S<©Î64Áf|£™nFÀ’}eváİfõcAøIşdò¿}÷ßx+)JMU°4b040031QÈÌKI­ĞË(ÉÍa(Øa¼şƒjVÌ^ÎûEş‡¦¦Oª*NÍK	H¬LLÊI)JÌ+NL.ÉÌÏÓK..fº^<ûânéi‡¸<‡Y>°Ë8 ü÷&œx¥WÛnÛFí³¾bâ—J®,Ë)šº1@HSÄ@/A£‡†+¬È‘½Éew—RÔ ÿŞYîU¤\K©{/gfÎÌœ.±„o_|ÿÃWççğşİœıÌ3¬İäXi¾â(_Â/7óA-Ù}É@‰‚ç\oáÏéär2½x¥Q®X†póæ÷×Ï§ği ô³jªLsQšï›º.¶ÃàG:]±Ö7 Q7²R0låùw/FW»w—¬`U†¿­†,Ï%*,ËDSéc´d•Z¡83^s
+qÎ6°²ƒ¼[
+Qt]cE!6Æ¹ )6Ê1xOUUòXOY]K±¨æKİôÿ$E<U­gÑÕ/!£M®‰A˜wÉåøGÌaEF£¿ªEfÍŠµlÖÆÏŠà¬¿Ö¡×/÷øñŸƒLT¦aVåÛ¹ø€Õ;¶eË«İjUZòêêfYğ*V¢­Äİuµ-—¢°;¦j.ı…œª©d…Š[TÌPK¾fa‘´€=QR–É^ˆñú•¯ÂQ¼åŠßî¹²gÉ÷Q
+•€Ú¤+V“i!‡.¾K!·°0¡³h£¶9»„…5&‘W\sßã#×ÿF\[X¸Yµxf=åÓìxh³çÿ÷RéÄU8…‹éé©è/»Ê2ØOçm©î'¶îŒ¡^rÌi,y¿®‡ÓÑâíñÎ]gŠªÎÜ?Hı¨Í¥ä9öe0áĞŠĞ)KI×ÒÁZy”ÙÀšŞ»ıÆ½Ì„Š>DRú´B›¿¸)í	¶ÓìX$.ªo×Á]šB;W;Âòˆn÷õ½–øë“Œ¨ÛıîÖ¡>Bßñ¢ßw§ÇM©jy<q>ÿû%9Àuokè_ªÿJùÂê§/’T¸¦ß€3ÿìQB±*Ã[øƒÚKf úÔ
+…‰7\¢]û¢œ“vªz	“öUı€ğJá$RçñiOBjq`ÔP¯Ÿ¯È×vlCÏO»A_†˜+pJ’:èŸyà˜—x(vßôÏíj·/Šp‡;èYä®>„jò¹İ/ñõshô¹É¶ŸØâ±$¸ê=<­®‡ŸÂ{$§‘ó¤3:"EÏ¢*’ß’:ó³™ãd¿št]6vöJ§ÿÚÍa}®Ló¶#PmM'Sú¹ ¤r§ÑúäW¡+ÑÜ?À›ù[ Üê+È0û`Æ¦Ÿ™ê
+Ò'ÍkVdMa†0Ó0ÚŒ€.´	¼E‰°Á¯é7Sª)Í xáÎ¬„ÆÉÒ$Åœå5J ‘|[Ñ }h`ó}c˜‘X2úö‰·ÜSaÁgmùÇ1Ôó`¬4ÒN!Ğ¸FsÙ3Î»»”ÛòàTºu½sğÉ±ˆÌİø)R„Ñşg›'Øé	ßĞĞŠgÂLôyğ/Çƒµx+)JMU°0b040031QH.JM,IOÌÉI-ÑK..fğÔúËù£¸&á‡şÿ+L“OÔL®ü	U›™—’Z¡—Q’›Ã°²}Á®ù3#»X<Ï}Ó¶h•Ë> Õ#Wx¥ËJ1E]ç+j/•t^"º7şD¥r{lèÇ#~½Íàxw.‡£ûºÎ\ïzhŠ.„"Î&„í€I¡)«ó#+G)5:Ÿª3iØ:ÕjÇIS/Ê¹”¡¨³·“U5±ùê{£—­6|Ó;èÒèQn|Zp>ğùxÌ?ûöp^ö‚ëiÆÙd­ã<$O÷|Ìè­¸ã®ÿ\æõ*ëeÁ'I­¨æ,oT.x+)JMU°0f040031QHIM.ª,(	OÌÉI-ÑK..fº^<ûânéi‡¸<‡Y>°Ë8Uœ™—’Z¡—Q’›Ã9Å:*Ç±RğzŞ4ùœğs×®  Õ^#x¥VßOÛ0ŞsşŠO-k¡À6!Hh?$¤M›“PW¹É•YKìÌq
+âŸûì4iGËúT9¾ïî¾»û|ÓTNáèàõÑ‹ı}¸úúşûğQ8¼LPh>ã¨Nàóåu”+v›1(dÊ®ğc´w¼7:".4ª‹.?|{w8‚‡ÌoVŠXs)@KÍÒ«2ÏÓE¯xon–Âœã(Ô¥ôJƒrøæmÿtÙvÊR&bü2ë±$QXÀâX–Bo¤Å•ÇQóœ›à|ËZÈ>º©”i;4–¦ò®
+ÎCÊ;j i‘£HPm)Ës%çÕÁ<7LJü£’™´¨#¡>‡ŒºP87Âu›\n¿ÇfÆiğB§Z†dæ,-ÑQkÁ.êüYêƒ%³½tÜá‡ £(–Âäk¸ÉâZşB¼XnÓB+.n!/§)A°m.Ÿ‹l*Sû¥j—c2HLe,-Â'ÓÅ+>gaÒè}{#3å5ş|rgçÔ~ı`åºŞ®0YqDÔ€ñj€êj:LZe¬¥ê¹ü2Ì¤ZÀ¤J| ­C›µ-Ö1L(×P=.¸æ4Ü}7øÕğWppfamâÕ©Å«Î›|V_ºúFÿƒ]“FscÉ+ìÂÁhw×¥ß#c×Rö„è¼ÉŠÛ=ÛúãÊQ§8ÕmÌx·¡{£ş ‚õ`ÉÖ¹2íVÙo${f¾•â	võ¯Á¡UŸ%W–’¶§Er+·5§¸ãÕÎI_|Go¢%İ@j…m$?ñ¸MÚØN¬C“8ºL»	nÓäÇÁ‡ÚR”5‚İ–f­/Ë;)njôñC]Cßöjß§Ã6©ó2¹=qTŠÿ~B6|õè‰úWÉ'”(]n&<i”Âı’ é½ß¢…BWúG~ó—´Ş“ªÍç¡ŠJ,ş.¹B—,¼<£å¡œz:â¤~NAÿDøƒJÒÕ†Ô'íIH-7Júynb­÷¥tâ´Ìª#&8%iêè	8Ô%\ò‰áU÷Ş²vSSx³‰ØÏ"·õÁwÕvµ<„×Ï¡™÷È­´İÂÖëŠàºwó²º~
+oMMçÉh‰”ymVüšÔZÊ'«Õä1zŒşK)‡x+)JMU0±`040031QpÌK©ÉÏNÍH¬LLÊIÕ+ÎÏa¨`=øçACÊ³ÏgŒßÜõ×Ş¦¾`án 'ExíZëoã6¿Ïù+Xİaá ‰ä¼6µ$YÍ‡vï.9,Š¢8ĞsC‹ªDÅ1Šıßo†‰’•ÄÎ&»=ÜùC»&9ï™ß…“şQÿ/ƒïŞ¸¸şåï#2U3qº1ÀÿAÓ›aÀÒ MN7|3¦(‰§4/˜ÿºşaûNÔ[)±apÇÙ<“¹
+H,SÅR8:ç‰švÇc¶­¿lrÅ©Ø.b*Øp'ì;Vßmo“Ë4eÂˆš2ò‘÷ˆàãœæ²½mqÎ3EŠ<S¥²â$Šâ$?	ü.S¦¢›iÄ€EÎÊY46°%¼PæËŒãñàtf–s[ş§”$¯¤ıDïÃ)o£/ÂXÎ"\‹€ºˆ>ıœ¢½ğ Ü±_Â”XÈ2'WWdÂ«= xzKr&†A¡‚SÆÀçÓœM†AÅSßSˆdÌÂ¸ 3M W‚¾gq¾ ÷Q2§B05ˆÌúÆÆ 2Œe²04:ÀÓÓdI,O8·ãm:f‚LdÁÖÏ’$g(v9mƒÙ!Ôl"MåqáiV*¢¤‘b÷`OÚ‰É²–mœVtœGGıÍÛ,•’©æª ­5çz=°&^ odméXï¶¹¢4üZ2Œ+Pñ†`Ş`{B–íïĞİÈ ¤¶Ásµ’·,myKF¯;?£ï	ÍT.Ä§7ºªÌ‘±I"'+G£!Ó£±ö°Ÿjçk‚Nß_£I_îz_@pÚ`ÚaiÓïu 5—ŸÕü÷ºôW‹ÙX
+ÇÁ|[—Ô+ŸQådLqß×ås-We–‰…c¥—ˆY{ˆ]|­\G¬å¹ÌÉO2¡¢']	¿Ó•Æğ€Ş‡– hQƒ¶ä2|€çıımÛ?Zç4ï"£¶Œ…,X“yŒKÁéÅg¬xègë¤¬Äer€TôhQVŸ@¯¸ƒ(ÜømÙD‰sFMÙœ`‹¾V(]ì~)‹K uÉ]±L
+N‰b…‚ój.ó[häÚWÅ»aa…2¿©¼œ€BsjAØ{UÛkÓ›ï6*ZĞq>…ŠBˆ o ’>bnË@„V¶FıÕÀmÅõo½à¯|‚ÍPËèMÊ4V\¦½MòGEd]vÃ â¤šİ€Lr9Óë¦	L8I›´ôşb|vqp<êÓ·Çû;Ç£ñQr~px¼Û?{ÏFû‡‡»Jë?¿/‘!Aš]d3¼£¢Şs9â‚¬Ÿt©ÍD¼©*íéy£T\!/,F÷ò6ÛÎAqÙV¾óØã1ÁÃøÑ‚aì	ÌBlKnîOëY¶ aĞüï’B¸™/Ó;–›P:ÅtçŒcÆëÁ«“Ø„ÃÒ\¦#œĞ ÃÏGÆ{öÌ	47Lì¦ræhS]&èBGÈRu]J\HYy{Á P¹Lo–ºt@¾'-]¿']ÿÈbHç+ŠıüáztB.ä,Ã¬Ç ˜‹J¡
+œ–s@Ö…E 22¾…i›§„İgBæà%%´[`‚NC.£Nƒ+~A  Ğ„é‹8$²	DK+f+²,Ü S£ÖjFÓ™Ğ2f 9Ô•.f§ÑPÉÈjVóÇçVğ>&
+Ö‚<ìEÔÕÍƒ #@“k§ËUˆÌ0Ş¦ÿXˆßq°ì—† …B]V³ĞM ®(zM¸ rSªMù¹Š^}ãZpìO*«¢±¦©x¢‚Ë\^‹¿Q¢iµ«AõÉ`Äj"‹¨Çı%0ÜÀ8fRÿ¾	ïîíÑ1İßÛ?x»ó6Ş=<b‡û»Ç³xíìTî´9¨§å‡n9İV}òæuuoğmèl`NcÜ o¨œÆª9êÊıób·OÎÎ/	Ma iß	Æ¢ÁÆ³G3fTäÂJê]j¾ÿ¾[æ’aÃĞªmçBè¸>"˜78X©$5“Âb®;h°©KoíƒŞ&¦2)BKöaÒîyğÌ ½ıÁÖ·ÄÙÚ°NcÑ<7W*ÈB4×ş…æ:GÕN|\@iîq6]ÃA6:†’"‰#’æ‡½çHDj]6”$,á1£8oâÊàrV‡¿—0¦2—x ĞMŸH\çéôÅÒb×œî.U<ğ¶nïô>îuÍ@Èœà»Ş˜„Kzàé
+ñ‚Ör=.¿kyË#Äj†ú÷)fw-cÉãæ˜ÛbË ³hL²rŸkTbï•™åö×2Ì=nš»Â¶ŒsËÆ<Çª_Úó¦ÁRö©ú¾û‰Ş‘µ¬Ôt¤ĞwéÇ-Õ7l{én¢‚Şqwo¾6+õ‡(Ğ/ñåÀÍæ…¦*Òæİ–\	{/_<f}Ä[/6¾²€ÁY_K¼môs éİoÂu_
+Ìx‹³]F„½g¼Õ>9"¦0IûF»ä­$BæÂ¿n¯0×üª7ÿ¨úMUpBT^²­zG_™Xÿõ7oáÖ/§o[–
+^[5UÅ	QKÄoø	'ÜìÀ¾Ö¢”’§j÷àmĞàUOÁ¾b]Ğ±@ª	¼iù†ÀÓ‰b?•Š¹àj|ñÏ	ÜJ›$ŒÀÏÆ°Z÷•¼ÕĞµ¦­lsvÓ8–%8¾ö^uÄ™o«fó×jTñøÿ;QiÇ¾NâUÃ’C÷Ê8ü…ÉsàŠiFò±ĞÏŠü‰ï"#kZLXîéıÒKxsn8òj`ÌÕníÀoR‘r6Ü÷Òa/2–&Ï‘P¹Ü<w¸‚È9>¿bà×HGË¯…Ã_^ñÏK®˜)_»Şi–åòî5£şç.÷ü3Ëqå¸ÿ×÷’àÍüaåO˜`ÚÑÚ3°ÏÏ08ÏàÑª«âÀŸY<WûO€O&àÊò•|Ué-Væ9óáÁ³ô¬:àì_£ñ8×scÇîp°Óíty¸ÿÊ¡­icåØ¿^ß«Uø	p¦#ü .“jœ|4{Ö™ç	{áëüA^d_|î~Í;p×œj^ı üßO]~rÏ“¯è)DÕ£o•P¿½ƒŸ¿¸Ÿ½ÀOşğ7¢ÿLíŞ
+x+)JMU°0b040031QHÎHMÎvJÌIÌKNÕK..fº^<ûânéi‡¸<‡Y>°Ë8U›™—’Z¡—Q’›Ã°Øšíß9“ó\/rlK_³®0×]l( ªÇ!Ÿx¥VßoÛ6Şsş
+–ëƒŒÅRƒ ÀZÒ$ÖK¶´(†a”t™Ğ”GRv… ÿûîHQ–<M1=Ø¢x÷İw?ÉBÕ;}õêä‡Ù‹Ëë‹Ş\±¥[©ùÑŒş˜ú.ç 9} QÍ>³8ÁÊ¥0\Î?}|7ı%v[Z¬ ç	Ûumge­hİÊÊ-ó
+6²„©_3©¥“BMm)ä'é«õb:e¿èR50·öŠS¦da„iÙtÚ´¥‘kÇ¬)s¾tnmÏ²¬¬tzo+PrcR.»[f€šU¶EÜÍ*i]X¬$‰óù,`ò¾ıûß@ËÏb îÅ—ô®®ïˆµ´iY¯2ú–¡¶Íîÿ!¤ì4}t‹ô$Úº1ìâö–-¤‚]”ÔÌ€Ê¹u­»À˜/,rf¥áà³P
+\ZZt3$ÊI§`~áw™`[/0ËÂç££Yò=+êª*>¿Ë“N EÉ“@Ñ8Wk&«œM¿õŸyTªAz NA?·lQ›[k·µ©zŸ=©×c®]c­E	îïVk%JXÖª“ó+¬BBÛŞUÖhÙ­«tÁñğ…É¼üÊGÎo*Q€"}¬i¹óª2@Ñ±n}6Ë¼è>Ğ3sğÅ	L‚ç=†b¦ŞÚœ¿¦şQô‚	ê¾Š8 ¶6rƒÉG÷øü&¼“¯ßGj òÿ=@kC ‘‡cï°˜¿Qò>»œHhH¦Êî²ŞjU‹Ê›hƒ	‹ãî1¤ç	gx@>‹8ÖhÎ§C	VXt“³ø%VŒ‡áóŞj”œe§múîh6I/“ª.›ÒIŠ5SµÉ¢Ñ¥“µN&½£/şãÖ›¤¥’åÃH¥×ñÈ2†#Ø8&Vk×ö2’ÛÓo°œ‘¹ØQ|’n„J&oF
+ˆ—D	–çŒóÛ˜o9á780-0tñ[­ºo¸Æè±ñ§t±y¶áL‘Ú:¡KI’—tT ‡QüÉì£…‰x?!È=x¥¢,ëF;<üüİâ(&ÂXÁCÒÕ¾.©ıŒ‘ÊÁxx„D„oi‡r€ş¥´8"[İ5:ÃÒÿø`Œwß	|¤†NÑû†¢^	RˆúİCA]šví’Î›Íã¾÷Šâ!»š|{ı[j‘úN.Ú$îN†Ayê`èßSô?›÷Cœ_‡º)–2ıï9u€ĞeWß|‘“64â(^ØM½Àóº)TÙî<]Hcß#@¬¿İ@äWA·ÆĞoñ5ù+Òùû˜=Òy|Æ8Õi†¥%õ›xQlÜï‰1ÆdQƒ|­÷¨Z±s›ãØ)?1&ê@¶Ïc“l¤I•HWÕ	ÛO¢Ó…î}úã×®=¯‹{(®½Å>	S¹“¿R@3:ábc‘Ò•¥~7¢DKw"¡ávÚÑ'<â€÷.º©ÿ9fixÍYíoÛ6¿Ïù+Xî°Ù¸DJš%m3Û@–µ¸nëÖ[|WŠ} %ÚV"K:’²cùß÷<|)Yi+:Th‹äóö{^øšååŒ<ÿöüÅßFOÈgºÌ$ùçôÍÏdåœÀK-yJTIÁ™â„‘Ÿ‘Š-8™—‚¤<ÛJeÅgXsiF¯ÉŠ$¯S.‰ZrRğ„KÉÄ–äÙL0‘ÁøàŸV¤äæ_5Û¡şÍÈÕõµo8MZËKÊB±¬À¸ª¬ày*µ¼P\*&å¦©f%yÎ“–räÇë_	˜_Î’$y–Ü"=jJ06‘wÚJfµReq¨'e"²J!(Æ,m±h‹(Y<ôZ¬uœ+Q®³àl)‰2¢0ƒ¨{³-7·¼Xš
+€ñT"[£;nùöP›
+?¤*8şË‚¤™¬r¶â¬Ğú e…p¬a¿S°Éèàèhr0zòÃ¯WÓÿ¾}I–j•Ã;ş!9+cÊŠœ¥íØÑŠ+F’%’«1ı÷ôÕÑsXÁc¦
+¶âcºÎø¦*…¢İÓM–ªå8åë,áGúåTËTÆò#™°œO¢cÇ
+#òµ	 ­|hÔY´î"Ó¥R•¼ˆã$-¢™ò<[‹¨à*^,cˆ^¯bŞS˜e^V.§“Ql˜YÎ]ù&BmğnÉ5`7ì.Z”å"ç¬Êd””«Çbßüc=>Î¢ûí¡Ä¶¬E“^~·Dğ|L¥Úæ\.9Ì—‚ÏÇ4Š%/Ò©`…dà÷²ˆ	–èT¦r>q±î’w›ñƒƒQl|>š•éÖĞhÈ—'“ŸK–ÚìĞ±wR ıA@|Ğ˜"Y:¦9ĞšÄú^§¹b³2 E?\Ê[æNIŸ?ÎZ3SÔ¶‚ğsFµPÿ‘ğe™§\ŒéK, ¸›ÖB0â[rÙdÁÒìQ“k]PšRGndYèœ%sQ®t êº)!ùªñÒz¸È¨æòö•aIÂ+HˆÈó	ñÍDÜ}ó“9›ñ•‡Ó5ëÒ”	:1Hû~1ŠõÒ.'#¤¸² Ak³"¢ÜÈ1=Ã|Îñd*‹­#rT³%°¥“·¶|ÁËã”
+˜|ºF{:=LõD7<N£†É>úxŸµÀ”,yr{UÖ›tr…o:®3D àFÌ&¸+y’We±H—9(¥E”•±İ+âã»ããggì)‡§ìôdöâ|–ÎÏØ‹ôäÙ³ùÙ·ìäìüä|~üœ’Éş‹G1ƒ øp<yšå2ßgmíÉı>Œ°†„¼ ¢ZØ_ÈX^óò1–§&S ;|„Ö°İ˜‘/ïåéƒ©€İµÍî-üè>N±ê½…nË¢ò;	l9°Iôd¹$¸¿¶ë]Óáo†N‚İ‚ØÁ>ç¹
+£KRŸ}²®§‚>l–¬óÿÇ*$ë…c³Isù˜IŞ9íéy;ğkÑâ—B@Ïş¦LYŞöUš­5Àèy¨ó9´ÒcºÂÕÁV¤ÁÄõáü‘mò:ëôZY±B3OòRò6s=D'_«lÅåwĞ‚ÁZàÍ¾TÊá)bó(®üÊ4tkhScÓ¬ŒÂ^ÙÄ±?À|ƒ‡˜Sh>¥bEÂ±E…ó‰‚VZøkSLäÖL˜åc8Äl6¢ƒ¦ÙUò4rå·:üÎcş÷ıj§ßFú´1˜×…îÉÃ?<…UUpU mNŠÒw'pƒry–6ºázX5@I®‹¡ÃhÍòÁŒÇ„Rà‹Â°Ër£SZ{—l2µÔ¯Úÿ;ÈİD†aZè[hp%7Z}‚
+Äß‡'@AÊµgzHè,/“Û>JF›ãıdˆ³­Û€Q¡$)çú[­¯Zê Cq”ŒµVn×ØğıñïNJøÑ–	°µü¢Y€OÜÙ­%òWôàp<Úmûı`4G à>(ÛL>ƒ#Z8VBwàb¶¼M~ÓƒNP˜eQYhÏI“}!_ç'àÌ#8½.àª´PcÛ~B#q½Ëëf÷êÒc—HÁåÄ-/"+|À[»ûŞ•(Ø4Î V6¡'‹ ­ÇîMF–ËÀÙy{_ÑAÇÈ5’Í9^³em[»^0ÑÚ­»©f,²¤û‰n”tä-A~|?Y’¹Öîµ‡û=I˜J–d ‹Öğa§>®¢O|k§ –Á&†›SJmÚeŞ÷­‘ûvìÚLÂ?—rŠ…YØˆª{P©yAÂÚv‡ûlLšLG"l15Ü„êĞ†³
+&]ÆfPWmåÅ@ÀÅC#AÀqöX
+™B÷?wĞ¶ñ!?`äöv<
+EWVÁå÷¯»R;Nr:Õ²LñÒFÁ œ©á^ªù]ÛTêŞEÂÕl–s
+%ÿ€R‰å«£	ú
+‘Â§å7¨Bïğb[q¸€´×–°ÑÁ‰P7Ndp7;±ÍÒ‹ôæŞğÒŠùl×İ<ñ¡ş@¸eÑÚeZÊ"õÇ]Éíªv6”52ÛÂ†\¤æ2Xf‹›ºàÜŞÆ6W¨Fˆ9F”/^n÷0?Áå…m¯‚„B*Pn0Üz›¦ÍßÏâ%úC}[(ç/ïÖ¼Š}½ÂGİÿ)bümÒÃ2-/ÍŞ9ğcA~8¹ìı’*
+ÚFŞ¸©@MiÂÜÇ»=²àERÂ7(aŠ¿ÈLÀx•ºƒÕí´B¬ğ–òÂ}§±­Àa+úq•*/]-¢»‹L^§ÇúÙM™bî-ık·MÂ¼ú¤¨»æ‹d`·›,ŸŞõã†5Ö„k]B¾2lŒ¡+|#à‹|ëùæĞ·¦v¨GÂ†8Èİt˜zß"©ğ+U6ß‚EÃN#|v¸è;^&NNá&‚\[µ9œl)×9&ÌŞëQ>°Çë£²¢‚5÷ş¦úÒ]ÂøûßƒQücHˆ$ê|æËZÁ'<MÖ(€jz‘ø†u¬r3sx×b®´ÅÊ·L¡bÛb‹Ds–ËĞ¸
+PüM­Ø,Ë3µE¶ø+ÛˆsG#ğŞØåUÿ´Ì­ïçªÎ
+õôìü‹AÊGOËwËÆÕ.ô_P3ÿ™Cz:^x:=DÀ'£=b¢y„0RÁİ="È BR§é^AşaËê3OÂ­ë÷ Ö¿Ü¬¸êñßáã%~ÿ	uPèx+)JMU010f040031Qğñtvõve˜îñçƒCÚÒ\¯Í—M33¶´º‹8A•¹:ºøºêå¦0øªå‡/<•ÜuïËëóó"“Ş˜ BRbqf²s~^IQbr	ƒwi½DqĞd™Øu­o4JÜ¬ŸvÉ
+¢.9#59Û)1'1/9•aÙ=O©—ÖÏ³xsŞ˜ç‡9ûÁşPeE©‰%©á‰99©%U¿”˜«­Up^˜¥³áÿ–7v@”¥¤&U”@Õ5ˆğ¼½­5Q¤ZšçYUf¹–˜ö‰ˆº‚ÄÊÄ¤œT¸ûz÷¼ {-U·Ùn!ÏN‹E7|Ì
+ *‹SóR ªCŠóŠ¾ÉÌÏc(‰t?~rß³"—¾'¹g÷ÍÖ|óÙš¡Y¥ñç¶unöÌ—éëÅ»'ó†B(DeI~vjÜ	ºÍûoNŸ¾p²‡¯±«øÆşµŸU }Ì¡šÿtOc                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          ·4N ®Ÿ0»—QÑ®®²Cï*M&oW£QÊc‡ZŞêëÏŸPYbì—Hüğ@f¥mJ³Ó5aih´…GBİü{ä¼»;ÌPPhAñàîÜÇ
+ªDÖ¬vàm†pÑ'VL˜2    â  c   £m“Áp u‹ÌéÅÓ¨N¸
+Àî­¥û
+R£äi^’wœB¾LPACK      ›>xœu“IªF „ïüŠ¹S	»@ÕKêÈ&²ƒ¢·A†EÙô×?“wMúÔÕ]}éªo1´˜‰ÏcD#,e²ÈÈ“3#œ±ŒÄs¸`æ©êG »|Ä+8b``4‚¨Ëß-.¿şgù@uûç­ü‘a™dôWÄ7}ÔÓ„G`Ô“9gàG×xhß?ËzªæìfåP¾êüñÍ°\à>ˆ,Ã…qjÿæ ÀúÒo
+„Š
+a ‡–z™¥ª
+Äy’ª…ßât	 ²l¡Öø³JU¡x;ñ}/ÉÚ`tü¢•$ıò™*ğÒö›R8Gíê°şÜŠ“Õ†Â©«]%¦¥¡»KEe8Wi™äluU‡ L aMÛyo‹ïû»Õ>ùU‡>Ü]uié×‡<)ÿMMÅÓPR^•5ºç‡¨?p0)›ö\*ÔX…½‰è^ÕjsjÓŠŠ*ï|kšæ¾w÷N7ã/ÛÆ#q2ı‡*ˆ ¡àÀ–öË™±®J>—ê÷Ë2!Ÿ;Má²±MjbÜä½îŞ³p?©´Å­…G¿6“”ïğ„nŞ¥*8ÌC”JğCÒœ±Q©‡îg7·œ»tş‡lÔËŸ¸îƒ-zêş9òNì¶šW´Ó–gÜ&‹ÏïÙÑcÇÄö(zaQõ°qwi‘h’OyÖ|:OÚÆ¥™ Ó–‡†söR2*Wfb±æ½Ã¥œ·á}¨·KÃÀô.İºËÎCÓ¦MÑ®ù,ğBj'çˆ 
+ö†è¦”°-¦s³è´í–Æ–÷‰³]µTcøª(£)Gß»Š
+ƒµ5=j–_ÊàÂµ7NuŒ“ûìKŸ±¢ÓOsz»Õõ(OB³:t6Şë–àĞ9ëŞÙ>=Ÿ)H0¼–™	Pâg}'·{QİìÕ¸-sô!¥ïøElÉ‹Ì±62gŒâk¡ı¬R…×’´{ò<¯7Ò•Ğ	äva¢u¶³Œ—Ï,#¸øKÔñ›	Íİÿ7„ÕÕSZğ¼_&q9Å¨xœ340031Qğñtvõve˜îñçƒCÚÒ\¯Í—M33¶´º‹8B”¹:ºøºêå¦0øªå‡/<•ÜuïËëóó"“Ş  }Ì6¿Bxœ]RKoÛ0¾ëW9µ€ÑÅN»©¶’ó²Ò,GÇVbHÊ‚şû‘NÚn"ù½ÈRCn;3ÃXêÎoŞ‡İ#<}ş|ê½¹Bn`eZÏXmüÉ†`İ6À`¼Ù¿ÁÑ·S4}o¸tCë&è Şàl|@€ÛÇÖNv:BJ1œŒÒwˆ×Öî¡Áu¶E>è]w9™)¶‘ôv4â``ÑÜ‹ÇY¤7íÈìÔ{oÁÕÆÁ]"x¢·q$`§n¼ôäá½=Ú“½+|Î’^& Ÿ	œ\oô5s¬óe?Ú0$Ğ[¢Ş_"çE&”ã‹óÌ82d°è{Îúén!ëgZh¼¯(På:¸Ó¿Il`‡‹ŸPÒÌ˜ŞáÊfÅ_¦‹T¡ñƒGw¥h›zK‰ÂwÆ4¶Ú½ûmæ,·óN.¢Õ›:Àùóª÷VÚq„½¹/uq½í_q<É‡ˆ‡·ígçg½ÿc>¡şZ@S-õ–+²ZU¯2,xƒïE[©×ÕFN(^êTKàå~È2K@ü¬•h¨“EK5Y¦ù&“å
+^WVø–…ÔHª+ Á;•‘B¥k|ò™K½KØRê’8—•5WZ¦›œ+¨7ª®òÒ–²\*T…(õªbÄ+> Yó<')Æ7è^‘?H«z§äj­a]å™Àâ‹@gü%7)•æ\	d¼à+1£*dQŒÆnî`»T"=¿TËª¤iUj…ÏS*ıİÊF$À•lh!KU	£u"¢šIWŠ­ş¹Ğ{ÓˆBÈÏ‘«!0E|~b ¢MTµ¶xœSV(OM2N­HÌ-ÈI-ærT(N-QÈO‹*À…÷œÚ£m“Áp u‹ÌéÅÓ¨N¸RIDX                   £m“Áp u‹ÌéÅÓ¨N¸ÉæMİ¶uÅPıèÌ¥*«ö²ÖùÖ|# pack-refs with: peeled fully-peeled sorted 
+dd19fc7be4bc08bb3bcc50506841f1e0eedcc70a refs/remotes/origin/main
+7bd33728ad40ad4e0b4e293f13040544020e3960
+ref: refs/remotes/origin/main
+7bd33728ad40ad4e0b4e293f13040544020e3960
+pragma solidity ^0.8.0;
+
+contract Counter {
+    string public contractName;
+    uint public counter;
+
+    constructor(string memory name) {
+        contractName = name;
+        counter = 0;
+    }
+
+    function incrementCounter() public {
+        counter++;
+    }
+
+    function decrementCounter() public {
+        counter--;
+    }
+}/* FILEPATH: /c:/dev/web3examples/createWallet/createWallet.css */
+
+/* Apply a background color */
+body {
+  background-color: #f2f2f2;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Center the content */
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Add a box shadow to a card */
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Style a button */
+button {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Add some spacing */
+.spacing {
+  margin-bottom: 20px;
+}
+
+textarea {
+  width: 30%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.btn {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.4);
+
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./checkBalance.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Check Balance</h1>
+        <label for="walletAddress">Enter your wallet address:</label>
+        <input type="text" id="walletAddress" name="walletAddress">
+        <br/>
+        <br/>
+
+        <button id="cryptoBalanceButton">Check Crypto Balance</button>
+        <br/>
+        <br/>
+
+        <label id="cryptoBalance">Crypto Balance: </label>
+        <br/>
+        <br/>
+        
+        <label for="tokenAddress">Enter the token address you are checking the token balance of:</label>
+        <input type="text" id="tokenAddress" name="tokenAddress">
+        <br/>
+        <button id="tokenBalanceButton">Check Token Balance</button>
+        <br/>
+        <br/>
+
+        <label id="tokenBalance">Token Balance:</label>
+        <br/>
+        <label id="tokenName">Token Name:</label>
+        <br/>
+        <label id="tokenSymbol">Token Symbol:</label>
+        <br/>
+        <label id="tokenDecimals">Token Decimals:</label>
+        <br/>
+        <label id="tokenTotalSupply">Token Total Supply:</label>
+        <br/>
+
+        <br/>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to the Sepolia test network on https://rpc2.sepolia.org
+        const web3 = new Web3("https://rpc2.sepolia.org");
+
+        // when you click cryptoBalanceButton button, check the balance of the wallet
+        $("#cryptoBalanceButton").click(function() {
+            // get the wallet address from the input field
+            // 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+            const walletAddress = $("#walletAddress").val();
+            // check if the wallet address is valid
+            if (web3.utils.isAddress(walletAddress)) {
+                
+                // get the balance of the wallet
+                web3.eth.getBalance(walletAddress).then(function(balance) {                    
+                    // convert the balance from wei to ether
+                    const balanceInEther = web3.utils.fromWei(balance, "ether");
+                    // display the balance
+                    $("#cryptoBalance").html("<strong>Crypto Balance: " + balanceInEther + " ETH</strong>");
+
+                    // NOTE: Compare your results for your wallet on the sepolia blockchain explorer https://sepolia.etherscan.io/
+                    // NOTE: You can add Sepolia Crypto to your wallet using the one of the many faucets here https://faucetlink.to/sepolia
+
+                });
+            } else {
+                // display an error message if the wallet address is invalid
+                $("#errorMessage").text("Invalid wallet address");
+                $("#errorModal").css("display", "block");
+            }
+        });
+
+        // when you click tokenBalanceButton button, check the balance of the token
+        $("#tokenBalanceButton").click(function() {
+            // get the wallet address from the input field
+            const walletAddress = $("#walletAddress").val();
+            // get the token address from the input field
+            const tokenAddress = $("#tokenAddress").val(); // 0x0addc2283aba4345616c278e7429facec3a83951
+            // check if the wallet address is valid
+            if (web3.utils.isAddress(walletAddress) && web3.utils.isAddress(tokenAddress)) {
+                // create a new contract instance using the ERC20 ABI and the token address
+                const contract = new web3.eth.Contract(IERC20_ABI, tokenAddress);
+                // call the balanceOf function of the contract to get the token balance of the wallet
+                contract.methods.balanceOf(walletAddress).call().then(function(balance) {
+                    // display the balance
+                    $("#tokenBalance").text("Token Balance: " + balance);
+
+                    // NOTE: You can get a random token for testing from a dedicated token faucet here https://faucet.quicknode.com/ethereum/sepolia 
+                    
+                });
+
+                contract.methods.name().call().then(function(name) {
+                    // display the token name
+                    $("#tokenName").text("Token Name: " + name);
+                });
+
+                contract.methods.symbol().call().then(function(symbol) {
+                    // display the token symbol
+                    $("#tokenSymbol").text("Token Symbol: " + symbol);
+                });
+
+                contract.methods.decimals().call().then(function(decimals) {
+                    // display the token decimals
+                    $("#tokenDecimals").text("Token Decimals: " + decimals);
+                });
+                contract.methods.totalSupply().call().then(function(totalSupply) {
+                    // display the token total supply
+                    $("#tokenTotalSupply").text("Token Total Supply: " + totalSupply);
+                });
+
+            } else {
+                // display an error message if the wallet address or token address is invalid
+                $("#errorMessage").text("Invalid wallet address or token address");
+                $("#errorModal").css("display", "block");
+            }
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+    
+        const IERC20_ABI = [
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "totalSupply",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "balanceOf",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transfer",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "name": "spender",
+                "type": "address"
+            }
+        ],
+        "name": "allowance",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "approve",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "sender",
+                "type": "address"
+            },
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transferFrom",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "from",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "to",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Transfer",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Approval",
+        "type": "event"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "name",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "symbol",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "decimals",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint8"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    }
+];
+</script>
+</html>/* FILEPATH: /c:/dev/web3examples/createWallet/createWallet.css */
+
+/* Apply a background color */
+body {
+  background-color: #f2f2f2;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Center the content */
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Add a box shadow to a card */
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Style a button */
+button {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Add some spacing */
+.spacing {
+  margin-bottom: 20px;
+}
+
+textarea {
+  width: 30%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.btn {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./createWallet.css">
+    <title>Create a wallet</title>
+
+</head>
+<body>
+        <h1>Create a Wallet</h1>
+        <button id="createWalletButton">Create Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <br/>
+        <!-- Download the keystore as a file {wallet}.json -->
+        <a class="btn" id="downloadKeystore" download="wallet.json">Download Keystore</a>
+</body>
+
+<script>
+    $(document).ready(function(){
+        $("#createWalletButton").click(function(){
+
+             // alert if empty password
+            var password = $("#password").val();
+             if(password == ""){
+                alert("Please enter a password for the Key Store");
+                return;
+            }
+            // Create a new Web3 instance
+            var web3 = new Web3();
+
+            // Create a new wallet
+            var wallet = web3.eth.accounts.create();
+            // wallet address into the text area
+            $("#walletAddress").val(wallet.address);
+
+            // Display the private key
+            $("#privateKey").val(wallet.privateKey);
+
+
+            // Display the keystore file
+            var keystore = web3.eth.accounts.encrypt(wallet.privateKey, password);
+            $("#keystore").val(JSON.stringify(keystore));
+
+        });
+    });
+
+    
+    $("#downloadKeystore").click(function(){
+            var keystore = $("#keystore").val();
+            // alert if keystore is empty
+            if(keystore == ""){
+                alert("Please create a wallet first");
+                return;
+            }
+            var blob = new Blob([keystore], {type: "text/plain;charset=utf-8"});
+            var wallet = $("#walletAddress").val();
+            saveAs(blob, wallet + ".json");
+        });
+
+    function saveAs(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+    }
+</script>
+</html>/* FILEPATH: /c:/dev/web3examples/createWallet/createWallet.css */
+
+/* Apply a background color */
+body {
+  background-color: #f2f2f2;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Center the content */
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Add a box shadow to a card */
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Style a button */
+button {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Add some spacing */
+.spacing {
+  margin-bottom: 20px;
+}
+
+textarea {
+  width: 30%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.btn {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.4);
+
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}<!-- 
+    This HTML file is used to create a web page for decrypting a wallet.
+    It includes the necessary libraries (Web3 and jQuery) and a CSS file.
+    The page contains input fields for entering a password and selecting a wallet JSON file.
+    After clicking the "Decrypt Wallet" button, the script uses the Web3 library to decrypt the wallet using the provided password and the selected file.
+    The decrypted wallet address, private key, and keystore are then displayed in the respective textareas.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./decryptWallet.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Decrypt a Wallet</h1>
+        <button id="decryptWalletButton">Decrypt Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <!-- Select a wallet json file from the file system -->
+        <input type="file" id="keystoreFile" accept=".json">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance
+        var web3 = new Web3();
+
+        $("#decryptWalletButton").click(function(){
+
+            // return if no password is entered
+            if ($("#password").val() == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a password");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            // load the contents of the file#
+            var file = $("#keystoreFile")[0].files[0];
+            // return if no file is selected
+            if (!file){
+                    // show the modal with the error
+                    $("#errorMessage").text("Please select a file");
+                    $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e){
+                var keystore = e.target.result;
+                var password = $("#password").val();
+                try {
+                    // decrypt the wallet
+                    var wallet = web3.eth.accounts.decrypt(keystore, password);
+                    // display the wallet address
+                    $("#walletAddress").val(wallet.address);
+                    // display the private key
+                    $("#privateKey").val(wallet.privateKey);
+                    // display the keystore
+                    $("#keystore").val(keystore);
+                } catch (error) {
+                    // show the modal with the error
+                    $("#errorMessage").text(error.message);
+                    $("#errorModal").css("display", "block");
+
+                }
+            };
+            reader.readAsText(file);
+
+
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+    
+</script>
+</html>MIT License
+
+Copyright (c) 2024 Andrew Le Gear
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+interface IERC20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
+
+contract AndyTokenPayable is IERC20 {
+    string public name;
+    string public symbol;
+    uint8 public decimals;
+    uint256 private _totalSupply;
+    mapping(address => uint256) private _balances;
+    mapping(address => mapping(address => uint256)) private _allowances;
+
+    constructor(string memory _name, string memory _symbol, uint8 _decimals, uint256 initialSupply) {
+        name = _name;
+        symbol = _symbol;
+        decimals = _decimals;
+        _totalSupply = initialSupply * 10**uint256(decimals);
+        _balances[msg.sender] = _totalSupply;
+        emit Transfer(address(0), msg.sender, _totalSupply);
+    }
+
+    function totalSupply() external view override returns (uint256) {
+        return _totalSupply;
+    }
+
+    function balanceOf(address account) external view override returns (uint256) {
+        return _balances[account];
+    }
+
+    function transfer(address recipient, uint256 amount) external override returns (bool) {
+        _transfer(msg.sender, recipient, amount);
+        return true;
+    }
+
+    function allowance(address owner, address spender) external view override returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    function approve(address spender, uint256 amount) external override returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
+    }
+
+    function transferFrom(address sender, address recipient, uint256 amount) external override returns (bool) {
+        _transfer(sender, recipient, amount);
+        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
+        return true;
+    }
+
+    function _transfer(address sender, address recipient, uint256 amount) internal {
+        require(sender != address(0), "ERC20: transfer from the zero address");
+        require(recipient != address(0), "ERC20: transfer to the zero address");
+        require(_balances[sender] >= amount, "ERC20: transfer amount exceeds balance");
+        
+        _balances[sender] -= amount;
+        _balances[recipient] += amount;
+        emit Transfer(sender, recipient, amount);
+    }
+
+    function _approve(address owner, address spender, uint256 amount) internal {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+
+    function buyToken() external payable {
+        require(msg.value >= 0.00001 ether, "Not enough ETH sent; check price!");
+
+        // Calculate the token amount. Here we're assuming 1 token for 0.00001 ETH.
+        // Adjust this if you want a different ratio.
+        uint256 tokenAmount = msg.value / 0.00001 ether;
+        // convert tokenAmount to wei
+        tokenAmount = tokenAmount * 10**uint256(decimals);
+        // Transfer the tokens to the sender
+        _transfer(address(this), msg.sender, tokenAmount);
+    }
+}
+# web3examples
+A set of web3 examples
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- include css-->
+    <link rel="stylesheet" href="referenceProject.css">
+
+    <title>Document</title>
+</head>
+<body>
+    <!-- Header of the page -->
+    <div class="header">
+        <h1>Reference Project - Tickets DApp</h1>
+        
+    </div>
+
+    <!-- Menu bar on the left for various pages -->
+    <div class="menu">
+        <ul>
+            <li><a href="#" onclick="openTab(event, 'home')">Home</a></li>
+            <li><a href="#" onclick="openTab(event, 'createWallet')">Create Wallet</a></li>
+            <li><a href="#" onclick="openTab(event, 'checkBalances')">Check Balances</a></li>
+            <li><a href="#" onclick="openTab(event, 'buyTicket')">Buy a Ticket</a></li>
+            <li><a href="#" onclick="openTab(event, 'sendToVendor')">Send To Vendor</a></li>
+        </ul>
+    </div>
+    <!-- Main content of the page -->
+    <div class="content">
+
+        <!-- add sections for home, create wallet, check balance, buy ticket and send to vendor.  reveal and hide the sections depending on which menu item is clicked -->
+        <div id="home" class="tabcontent">
+            <h1>Project Brief</h1>
+            <h2>Module: Blockchain Technologies and Applications</h2>
+            
+            <h3>Summary</h3>
+            <p>Create a Web3 Distributed Application (DApp) that implements simple ticketing system. You should use the Ethereum Sepolia Testnet as you blockchain for Solidity smart contract deployments, and HTML, CSS and Javascript for your front end. You are free to use any development environments that you are comfortable with, however examples in this module will be demonstrated using Visual Studio Code and the Online Remix Solidity compiler and deployment tool.</p>
+            
+            <h3>Requirements</h3>
+            <ul>
+                <li>Front End:
+                    <ul>
+                        <li>Page allowing a user to create a wallet.
+                            <ul>
+                                <li>Should provide the ability to download the created wallet.</li>
+                                <li>Should display wallet details once created.</li>
+                            </ul>
+                        </li>
+                        <li>Page allowing a user to check their current crypto and ticket token balance.
+                            <ul>
+                                <li>To be used by the following actors:
+                                    <ul>
+                                        <li>Person attending the event so that they can confirm their purchase.</li>
+                                        <li>Doorman, so they can confirm a wallet is the holder of the ticket.</li>
+                                        <li>Venue, so they can check on distribution of tickets</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </li>
+                        <li>Page allowing a user to buy a ticket (token).</li>
+                        <li>Page allowing a user to transfer a ticket back to the vendor.</li>
+                    </ul>
+                </li>
+                <li>Blockchain Backend:
+                    <ul>
+                        <li>Smart contract implementing the ERC-20 standard and extended to allow tickets to be purchased using the native cryptocurrency of Sepolia (SETH)</li>
+                    </ul>
+                </li>
+                <li>Project should be submitted as a zipped solution</li>
+                <li>The project should be accompanied by a report detailing the following:
+                    <ul>
+                        <li>Code overview.</li>
+                        <li>Design description.</li>
+                        <li>Links to transactions on Sepoliaâ€™s blockchain explorer showing:
+                            <ul>
+                                <li>A successful deployment of your contract</li>
+                                <li>A successful execution of your contract to buy a token</li>
+                                <li>A successful topping up of separate wallets for:
+                                    <ul>
+                                        <li>Contract creator</li>
+                                        <li>Ticket Purchaser</li>
+                                        <li>Vendor / Doorman</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </li>
+                        <li>A video of my reference implementation of the front end can be found here.</li>
+                    </ul>
+                </li>
+            </ul>
+            
+            <h3>Grading Rubrik</h3>
+            <ul>
+                <li>Front End (40%)
+                    <ul>
+                        <li>Wallet Creation Page (10%)
+                            <ul>
+                                <li>Ability to create a wallet: 5%</li>
+                                <li>Ability to download the created wallet: 2.5%</li>
+                                <li>Display of wallet details: 2.5%</li>
+                            </ul>
+                        </li>
+                        <li>Balance Check Page (10%)
+                            <ul>
+                                <li>Functionality for different actors (attendee, doorman, venue): 5%</li>
+                                <li>Accuracy of balance display: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Ticket Purchase Page (10%)
+                            <ul>
+                                <li>User-friendly interface: 3%</li>
+                                <li>Successful transaction process: 7%</li>
+                            </ul>
+                        </li>
+                        <li>Ticket Transfer Page (10%)
+                            <ul>
+                                <li>Ease of transferring tickets back to the vendor: 5%</li>
+                                <li>Correct update of token balance post-transfer: 5%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+                <li>Blockchain Backend (40%)
+                    <ul>
+                        <li>Smart Contract (20%)
+                            <ul>
+                                <li>Implementation of ERC-20 standard: 10%</li>
+                                <li>Extension for ticket purchase with SETH: 10%</li>
+                            </ul>
+                        </li>
+                        <li>Project Submission (10%)
+                            <ul>
+                                <li>Correct file structure in zipped solution: 5%</li>
+                                <li>Completeness of all required files: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Report (10%)
+                            <ul>
+                                <li>Code overview clarity: 3.33%</li>
+                                <li>Design description detail: 3.33%</li>
+                                <li>Links to transactions and their success: 3.34%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+                <li>Code Quality and Documentation (20%)
+                    <ul>
+                        <li>Code Readability (5%)
+                            <ul>
+                                <li>Commenting and documentation: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Code Efficiency (5%)
+                            <ul>
+                                <li>Optimization of code: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Error Handling (5%)
+                            <ul>
+                                <li>Proper error messages and handling: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Code Testing (5%)
+                            <ul>
+                                <li>Comprehensive tests and coverage: 5%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+            <p>Total: 100% (50% of Module grade)</p>
+        </div>
+        <div id="createWallet" class="tabcontent">
+
+            <h1>Create a Wallet</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="password" placeholder="Enter a password for the Key Store">
+            <br/>
+            <br/>
+            <button class="btn" id="createWalletButton">Create Wallet</button>
+            <br/>
+            <br/>
+    
+            <label for="walletAddress">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddress" contenteditable="false"></input>
+            <br/>
+            <br/>
+            <label for="privateKey">Private Key:</label>
+            <br/>
+            <input type="text" id="privateKey" rows="5" cols="50" contenteditable="false"></input>
+            <br/>
+            <br/>
+            <label for="keystore">Keystore File:</label>
+            <br/>
+            <textarea id="keystore" rows="5" cols="50" contenteditable="false"></textarea>
+        
+            <br/>
+            <br/>
+            <!-- Download the keystore as a file {wallet}.json -->
+            <a class="btn" id="downloadKeystore" download="wallet.json">Download Keystore</a>
+
+            <p>This JSON represents an Ethereum wallet in the Keystore format. Here's a breakdown of each part:</p>
+
+            <ul>
+                <li><strong>"version"</strong>: The version of the Keystore format. In this case, it's version 3.</li>
+                <li><strong>"id"</strong>: A unique identifier for the wallet. This is usually a UUID.</li>
+                <li><strong>"address"</strong>: The Ethereum address of the wallet. This is derived from the public key.</li>
+                <li><strong>"crypto"</strong>: This object contains the encrypted private key and the details about the encryption.</li>
+                <li><strong>"ciphertext"</strong>: The encrypted private key.</li>
+                <li><strong>"cipherparams"</strong>: The parameters used for the cipher. In this case, it includes the initialization vector ("iv") used for the AES-128-CTR cipher.</li>
+                <li><strong>"cipher"</strong>: The name of the cipher algorithm used to encrypt the private key. In this case, it's AES-128-CTR.</li>
+                <li><strong>"kdf"</strong>: The key derivation function used to derive a symmetric key from the password. In this case, it's scrypt.</li>
+                <li><strong>"kdfparams"</strong>: The parameters used for the key derivation function. It includes the length of the derived key ("dklen"), the salt used for key derivation ("salt"), and parameters specific to the scrypt function ("n", "r", "p").</li>
+                <li><strong>"mac"</strong>: A message authentication code that verifies the password entered by the user. It's generated from the derived key and the ciphertext.</li>
+            </ul>
+
+            <p>This format allows the private key of an Ethereum wallet to be securely stored and retrieved using a password.</p>
+        </div>
+        <div id="checkBalances" class="tabcontent tabshown">
+            <h1>Check Balances</h1>
+            <p>Checks balances for the native cryptocurrency SETH on Sepolia and the Ticket Token Contract deployed on sepolia to address <a href="https://sepolia.etherscan.io/address/0x0addc2283aba4345616c278e7429facec3a83951" target="_blank">0x0addc2283aba4345616c278e7429facec3a83951</a></p>
+            <label for="walletAddressBalance">Enter your wallet address:</label>
+            <input type="text" id="walletAddressBalance" name="walletAddress">
+            <br/>
+            <br/>
+            <button class="btn" id="checkBalancesButton">Check Balances</button>
+            <br/>
+            <br/>
+            <label id="cryptoBalance">Crypto Balance: </label>
+            <br/>
+            <br/>
+            <label id="tokenBalance">Token Balance:</label>
+            <br/>
+            <br/>
+        </div>
+        <div id="buyTicket" class="tabcontent">
+
+            <h1>Buy a Ticket</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="passwordBuy" placeholder="Enter a password for the Key Store">
+            <button class="btn" id="loadWalletButton">Load Wallet</button>
+            <!-- Select a wallet json file from the file system -->
+            <input type="file" id="keystoreFile" accept=".json">
+            <br/>
+            <br/>
+    
+            <label for="walletAddressBuy">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddressBuy" rows="5" cols="50"></input>
+            <input style="display: none;" type="text" id="privateKeyBuy" rows="5" cols="50"></input>
+            <br/>
+            <br/>
+            <br/>
+            <button class="btn" id="buyTokensButton">Buy Tickets</button>
+            <!-- Enter the amount to pay -->
+            <input id="amountToPay" type="number" id="amount" placeholder="0.00001 SETH Per Ticket">
+            <br/>
+    
+            <!-- Put the transaction request details here -->
+            <label for="transactionRequest">Transaction Request: </label>
+            <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+            <br/>
+            <!-- Put the transaction result details here -->
+            <label for="transactionResult">Transaction Result: </label>
+            <textarea id="transactionResult" rows="5" cols="50"></textarea>
+    
+            <br/>
+            <br/>
+            <br/>
+    
+        </div>
+        <div id="sendToVendor" class="tabcontent">
+
+            <h1>Send Ticket To Vendor</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="passwordVendor" placeholder="Enter a password for the Key Store">
+            <button class="btn" id="loadWalletButtonVendor">Load Wallet</button>
+            <!-- Select a wallet json file from the file system -->
+            <input type="file" id="keystoreFileVendor" accept=".json">
+            <br/>
+            <br/>
+    
+            <label for="walletAddressVendor">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddressVendor" rows="5" cols="50"></input>
+            <input style="display: none;" type="text" id="privateKeyVendor" rows="5" cols="50"></input>
+            <br/>
+            <br/>
+            <br/>
+            <button class="btn" id="vendorTokensButton">Send Ticket To Vendor</button>
+            <!-- Enter the amount to pay -->
+            <br/>
+    
+            <!-- Put the transaction request details here -->
+            <label for="transactionRequestVendor">Transaction Request: </label>
+            <textarea id="transactionRequestVendor" rows="5" cols="50"></textarea>
+            <br/>
+            <!-- Put the transaction result details here -->
+            <label for="transactionResultVendor">Transaction Result: </label>
+            <textarea id="transactionResultVendor" rows="5" cols="50"></textarea>
+    
+            <br/>
+            <br/>
+            <br/>
+    
+        </div>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+    </div>
+
+
+
+</body>
+
+    <!-- include jquery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- include web3 -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- include js -->
+    <script src="referenceProject.js"></script>
+
+</html>/* left menu bar */
+.menu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 200px;
+    height: 100%;
+    background-color: #333;
+    color: #fff;
+    padding: 10px;
+    z-index: 100;
+}
+
+/* menu items */
+.menu a {
+    display: block;
+    color: #fff;
+    text-decoration: none;
+    padding: 10px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #222;
+}
+
+/* menu items on hover */
+.menu a:hover {
+    background-color: #444;
+}
+
+/* content */
+.content {
+    margin-left: 220px;
+    padding: 20px;
+}
+
+.menu ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.menu ul li {
+    padding: 10px;
+    border-bottom: 1px solid #222;
+}
+
+.menu ul li a {
+    color: #fff;
+    text-decoration: none;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.header {
+    background-color: #333;
+    color: #fff;
+    padding: 10px;
+    text-align: center;
+}
+
+.header h1 {
+    margin: 0;
+    background-color: #444;
+}
+
+.tabcontent {
+    display: none;
+}
+
+.tabshown {
+    display: block;
+}
+
+/* Add a box shadow to a card */
+.card {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Style a button */
+  button {
+    background-color: #007bff;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-family: 'Courier New', Courier, monospace;
+  }
+  
+  /* Add some spacing */
+  .spacing {
+    margin-bottom: 20px;
+  }
+  
+  textarea {
+    width: 50%;
+    height: 100px;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+  }
+  
+  .btn {
+    background-color: #444;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-family: 'Courier New', Courier, monospace;
+  }
+
+  /* make the length of an input field 100% */
+  input[type=text], select {
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+  /* make the length of an input field 100% */
+  input[type=password], select {
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+    input {
+        width: 50%;
+    }
+
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1;
+        left: 150px;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgb(0, 0, 0);
+        background-color: rgba(0, 0, 0, 0.4);
+      
+      }
+      
+      .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+      }
+
+// create a new web3 instance connected to the Sepolia test network on https://rpc2.sepolia.org
+const web3 = new Web3("https://rpc2.sepolia.org");
+const tokenAddress = "0xf349aebe6ad110f28d133c8146cea2ac6c9fca86";
+
+  
+const IERC20_ABI = [
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "totalSupply",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "balanceOf",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transfer",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [
+            {
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "name": "spender",
+                "type": "address"
+            }
+        ],
+        "name": "allowance",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "approve",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "sender",
+                "type": "address"
+            },
+            {
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "transferFrom",
+        "outputs": [
+            {
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "from",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "to",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Transfer",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "name": "owner",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "name": "spender",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Approval",
+        "type": "event"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "name",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "symbol",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "decimals",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint8"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    }
+];
+
+
+
+        // when you click cryptoBalanceButton button, check the balance of the wallet
+        $("#checkBalancesButton").click(function() {
+            // get the wallet address from the input field
+            // 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+            const walletAddress = $("#walletAddressBalance").val();
+            // check if the wallet address is valid
+            if (web3.utils.isAddress(walletAddress)) {
+                
+                // get the balance of the wallet
+                web3.eth.getBalance(walletAddress).then(function(balance) {                    
+                    // convert the balance from wei to ether
+                    const balanceInEther = web3.utils.fromWei(balance, "ether");
+                    // display the balance
+                    $("#cryptoBalance").html("<strong>Crypto Balance: " + balanceInEther + " ETH</strong>");
+
+                        // create a new contract instance using the ERC20 ABI and the token address
+                    const contract = new web3.eth.Contract(IERC20_ABI, tokenAddress);
+                    // call the balanceOf function of the contract to get the token balance of the wallet
+                    contract.methods.balanceOf(walletAddress).call().then(function(balance) {
+                        // display the balance
+                        $("#tokenBalance").html("<strong>Token Balance: " + balance+ "Ticket Tokens</strong>");
+                        // NOTE: You can get a random token for testing from a dedicated token faucet here https://faucet.quicknode.com/ethereum/sepolia 
+                    });
+
+                    // NOTE: Compare your results for your wallet on the sepolia blockchain explorer https://sepolia.etherscan.io/
+                    // NOTE: You can add Sepolia Crypto to your wallet using the one of the many faucets here https://faucetlink.to/sepolia
+
+                });
+            } else {
+                // display an error message if the wallet address is invalid
+                $("#errorMessage").text("Invalid wallet address");
+                $("#errorModal").css("display", "block");
+            }
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+  
+
+function openTab(evt, tabName) {
+    var i, tabcontent, tablinks;
+    tabcontent = document.getElementsByClassName("tabcontent");
+    for (i = 0; i < tabcontent.length; i++) {
+        tabcontent[i].style.display = "none";
+    }
+    tablinks = document.getElementsByClassName("tablinks");
+    for (i = 0; i < tablinks.length; i++) {
+        tablinks[i].className = tablinks[i].className.replace(" active", "");
+    }
+    document.getElementById(tabName).style.display = "block";
+    evt.currentTarget.className += " active";
+}
+
+
+$("#createWalletButton").click(function(){
+         // alert if empty password
+        var password = $("#password").val();
+         if(password == ""){
+            alert("Please enter a password for the Key Store");
+            return;
+        }
+        // Create a new Web3 instance
+        var web3 = new Web3();
+
+        // Create a new wallet
+        var wallet = web3.eth.accounts.create();
+        // wallet address into the text area
+        $("#walletAddress").val(wallet.address);
+        $("#walletAddressBalance").val(wallet.address);
+
+        // Display the private key
+        $("#privateKey").val(wallet.privateKey);
+
+
+        // Display the keystore file
+        var keystore = web3.eth.accounts.encrypt(wallet.privateKey, password);
+        $("#keystore").val(JSON.stringify(keystore));
+
+    });
+
+
+$("#downloadKeystore").click(function(){
+        var keystore = $("#keystore").val();
+        // alert if keystore is empty
+        if(keystore == ""){
+            alert("Please create a wallet first");
+            return;
+        }
+        var blob = new Blob([keystore], {type: "text/plain;charset=utf-8"});
+        var wallet = $("#walletAddress").val();
+        saveAs(blob, wallet + ".json");
+    });
+
+function saveAs(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+}
+
+
+$("#loadWalletButton").click(function(){
+
+    // return if no password is entered
+    if ($("#passwordBuy").val() == ""){
+        // show the modal with the error
+        $("#errorMessage").text("Please enter a password");
+        $("#errorModal").css("display", "block");
+        return;
+    }
+
+    // load the contents of the file#
+    var file = $("#keystoreFile")[0].files[0];
+    // return if no file is selected
+    if (!file){
+            // show the modal with the error
+            $("#errorMessage").text("Please select a file");
+            $("#errorModal").css("display", "block");
+        return;
+    }
+
+    var reader = new FileReader();
+    reader.onload = function(e){
+        var keystore = e.target.result;
+        var password = $("#passwordBuy").val();
+        try {
+            // decrypt the wallet
+            var wallet = web3.eth.accounts.decrypt(keystore, password);
+            // display the wallet address
+            $("#walletAddressBuy").val(wallet.address);
+            // display the private key
+            $("#privateKeyBuy").val(wallet.privateKey);
+        } catch (error) {
+            // show the modal with the error
+            $("#errorMessage").text(error.message);
+            $("#errorModal").css("display", "block");
+
+        }
+    };
+    reader.readAsText(file);
+
+
+});
+
+
+$("#buyTokensButton").click(function(){
+    // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+    var privateKey = $("#privateKeyBuy").val();
+
+    // alert if no private key is entered
+    if (privateKey == ""){
+        // show the modal with the error
+        $("#errorMessage").text("Please enter a private key");
+        $("#errorModal").css("display", "block");
+        return;
+    }
+
+    var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+    // contract creator 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+    var contractAddress = tokenAddress;
+    var contract = new web3.eth.Contract(ABI, contractAddress);
+    var transaction = contract.methods.buyToken();
+    var encodedABI = transaction.encodeABI();
+    var amount = $("#amountToPay").val();
+    var tx = {
+        from: wallet.address,
+        to: contractAddress,
+        gas: 2000000,
+        data: encodedABI,
+        value: web3.utils.toWei(amount, 'ether') // Add the amount to the payable transaction
+    };
+
+    // show the modal saying that the transaction is in progress
+    $("#errorMessage").text("Transaction in progress.  This could take 30s");
+    $("#errorModal").css("display", "block");
+
+    web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+        web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+            $("#transactionRequest").val(JSON.stringify(tx));
+            $("#transactionResult").val(JSON.stringify(receipt));
+
+            // dismiss the modal
+            $("#errorModal").css("display", "block");
+        });
+    });
+
+});
+
+$("#loadWalletButtonVendor").click(function(){
+
+    // return if no password is entered
+    if ($("#passwordVendor").val() == ""){
+        // show the modal with the error
+        $("#errorMessage").text("Please enter a password");
+        $("#errorModal").css("display", "block");
+        return;
+    }
+
+    // load the contents of the file#
+    var file = $("#keystoreFileVendor")[0].files[0];
+    // return if no file is selected
+    if (!file){
+            // show the modal with the error
+            $("#errorMessage").text("Please select a file");
+            $("#errorModal").css("display", "block");
+        return;
+    }
+
+    var reader = new FileReader();
+    reader.onload = function(e){
+        var keystore = e.target.result;
+        var password = $("#passwordVendor").val();
+        try {
+            // decrypt the wallet
+            var wallet = web3.eth.accounts.decrypt(keystore, password);
+            // display the wallet address
+            $("#walletAddressVendor").val(wallet.address);
+            // display the private key
+            $("#privateKeyVendor").val(wallet.privateKey);
+        } catch (error) {
+            // show the modal with the error
+            $("#errorMessage").text(error.message);
+            $("#errorModal").css("display", "block");
+
+        }
+    };
+    reader.readAsText(file);
+
+
+});
+
+
+$("#vendorTokensButton").click(function(){
+    // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+    var privateKey = $("#privateKeyVendor").val();
+
+    // alert if no private key is entered
+    if (privateKey == ""){
+        // show the modal with the error
+        $("#errorMessage").text("Please enter a private key");
+        $("#errorModal").css("display", "block");
+        return;
+    }
+
+    var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+    // contract creator 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+    var contractAddress = tokenAddress;
+    var contract = new web3.eth.Contract(ABI, contractAddress);
+    var amount = 1 //web3.utils.toWei('1', 'ether');; // 1 token
+    var transaction = contract.methods.transfer(tokenAddress, amount);
+    var encodedABI = transaction.encodeABI();
+    var tx = {
+        from: wallet.address,
+        to: contractAddress,
+        gas: 2000000,
+        data: encodedABI
+    };
+
+    // show the modal saying that the transaction is in progress
+    $("#errorMessage").text("Transaction in progress.  This could take 30s");
+    $("#errorModal").css("display", "block");
+
+    web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+        web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+            $("#transactionRequestVendor").val(JSON.stringify(tx));
+            $("#transactionResultVendor").val(JSON.stringify(receipt));
+
+            // dismiss the modal
+            $("#errorModal").css("display", "block");
+        });
+    });
+
+});
+
+const ABI = [
+{
+"inputs": [
+    {
+        "internalType": "string",
+        "name": "_name",
+        "type": "string"
+    },
+    {
+        "internalType": "string",
+        "name": "_symbol",
+        "type": "string"
+    },
+    {
+        "internalType": "uint8",
+        "name": "_decimals",
+        "type": "uint8"
+    },
+    {
+        "internalType": "uint256",
+        "name": "initialSupply",
+        "type": "uint256"
+    }
+],
+"stateMutability": "nonpayable",
+"type": "constructor"
+},
+{
+"anonymous": false,
+"inputs": [
+    {
+        "indexed": true,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+    },
+    {
+        "indexed": true,
+        "internalType": "address",
+        "name": "spender",
+        "type": "address"
+    },
+    {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+    }
+],
+"name": "Approval",
+"type": "event"
+},
+{
+"inputs": [
+    {
+        "internalType": "address",
+        "name": "spender",
+        "type": "address"
+    },
+    {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }
+],
+"name": "approve",
+"outputs": [
+    {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+    }
+],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "buyToken",
+"outputs": [],
+"stateMutability": "payable",
+"type": "function"
+},
+{
+"inputs": [
+    {
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+    },
+    {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }
+],
+"name": "transfer",
+"outputs": [
+    {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+    }
+],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"anonymous": false,
+"inputs": [
+    {
+        "indexed": true,
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+    },
+    {
+        "indexed": true,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+    },
+    {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+    }
+],
+"name": "Transfer",
+"type": "event"
+},
+{
+"inputs": [
+    {
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+    },
+    {
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+    },
+    {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }
+],
+"name": "transferFrom",
+"outputs": [
+    {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+    }
+],
+"stateMutability": "nonpayable",
+"type": "function"
+},
+{
+"inputs": [
+    {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+    },
+    {
+        "internalType": "address",
+        "name": "spender",
+        "type": "address"
+    }
+],
+"name": "allowance",
+"outputs": [
+    {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [
+    {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+    }
+],
+"name": "balanceOf",
+"outputs": [
+    {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "decimals",
+"outputs": [
+    {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "name",
+"outputs": [
+    {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "symbol",
+"outputs": [
+    {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+},
+{
+"inputs": [],
+"name": "totalSupply",
+"outputs": [
+    {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }
+],
+"stateMutability": "view",
+"type": "function"
+}
+];
+
+<!-- 
+    This HTML file is used to create a web page for decrypting a wallet.
+    It includes the necessary libraries (Web3 and jQuery) and a CSS file.
+    The page contains input fields for entering a password and selecting a wallet JSON file.
+    After clicking the "Decrypt Wallet" button, the script uses the Web3 library to decrypt the wallet using the provided password and the selected file.
+    The decrypted wallet address, private key, and keystore are then displayed in the respective textareas.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./sendPayableTransaction.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Load Wallet and Send a Payable Transaction</h1>
+        <button id="loadWalletButton">Load Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <!-- Select a wallet json file from the file system -->
+        <input type="file" id="keystoreFile" accept=".json">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <br/>
+        <h3 for="buyTokensButton">Buy Tokens from Contract <a href="https://sepolia.etherscan.io/address/0xf349aebe6ad110f28d133c8146cea2ac6c9fca86" target="_blank">0xf349aebe6ad110f28d133c8146cea2ac6c9fca86</a></h3>
+        <br/>
+        <button id="buyTokensButton">Buy Tokens</button>
+        <!-- Enter the amount to pay -->
+        <input id="amountToPay" type="number" id="amount" placeholder="Enter the amount to pay">
+        <br/>
+
+        <!-- Put the transaction request details here -->
+        <label for="transactionRequest">Transaction Request: </label>
+        <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+        <br/>
+        <!-- Put the transaction result details here -->
+        <label for="transactionResult">Transaction Result: </label>
+        <textarea id="transactionResult" rows="5" cols="50"></textarea>
+
+        <br/>
+        <br/>
+        <br/>
+
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to Sepolia
+        var web3 = new Web3("https://rpc2.sepolia.org");
+
+        $("#loadWalletButton").click(function(){
+
+            // return if no password is entered
+            if ($("#password").val() == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a password");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            // load the contents of the file#
+            var file = $("#keystoreFile")[0].files[0];
+            // return if no file is selected
+            if (!file){
+                    // show the modal with the error
+                    $("#errorMessage").text("Please select a file");
+                    $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e){
+                var keystore = e.target.result;
+                var password = $("#password").val();
+                try {
+                    // decrypt the wallet
+                    var wallet = web3.eth.accounts.decrypt(keystore, password);
+                    // display the wallet address
+                    $("#walletAddress").val(wallet.address);
+                    // display the private key
+                    $("#privateKey").val(wallet.privateKey);
+                    // display the keystore
+                    $("#keystore").val(keystore);
+                } catch (error) {
+                    // show the modal with the error
+                    $("#errorMessage").text(error.message);
+                    $("#errorModal").css("display", "block");
+
+                }
+            };
+            reader.readAsText(file);
+
+
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+
+        $("#buyTokensButton").click(function(){
+            // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+            var privateKey = $("#privateKey").val();
+
+            // alert if no private key is entered
+            if (privateKey == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a private key");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+            // contract creator 0x8DC4bAC59E0a169419Eb8dB57920ADe558E47725
+            var contractAddress = "0xf349aebe6ad110f28d133c8146cea2ac6c9fca86";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            var transaction = contract.methods.buyToken();
+            var encodedABI = transaction.encodeABI();
+            var amount = $("#amountToPay").val();
+            var tx = {
+                from: wallet.address,
+                to: contractAddress,
+                gas: 2000000,
+                data: encodedABI,
+                value: web3.utils.toWei(amount, 'ether') // Add the amount to the payable transaction
+            };
+
+            // show the modal saying that the transaction is in progress
+            $("#errorMessage").text("Transaction in progress.  This could take 30s");
+            $("#errorModal").css("display", "block");
+
+            web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+                web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+                    $("#transactionRequest").val(JSON.stringify(tx));
+                    $("#transactionResult").val(JSON.stringify(receipt));
+
+                    // dismiss the modal
+                    $("#errorModal").css("display", "block");
+                });
+            });
+
+        });
+        
+        const ABI = [
+	{
+		"inputs": [
+			{
+				"internalType": "string",
+				"name": "_name",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "_symbol",
+				"type": "string"
+			},
+			{
+				"internalType": "uint8",
+				"name": "_decimals",
+				"type": "uint8"
+			},
+			{
+				"internalType": "uint256",
+				"name": "initialSupply",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "constructor"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "value",
+				"type": "uint256"
+			}
+		],
+		"name": "Approval",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "approve",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "buyToken",
+		"outputs": [],
+		"stateMutability": "payable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "recipient",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transfer",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "from",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "to",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "value",
+				"type": "uint256"
+			}
+		],
+		"name": "Transfer",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "recipient",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transferFrom",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			}
+		],
+		"name": "allowance",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "account",
+				"type": "address"
+			}
+		],
+		"name": "balanceOf",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "decimals",
+		"outputs": [
+			{
+				"internalType": "uint8",
+				"name": "",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "name",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "symbol",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "totalSupply",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+];
+</script>
+</html>/* FILEPATH: /c:/dev/web3examples/createWallet/createWallet.css */
+
+/* Apply a background color */
+body {
+  background-color: #f2f2f2;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Center the content */
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Add a box shadow to a card */
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Style a button */
+button {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Add some spacing */
+.spacing {
+  margin-bottom: 20px;
+}
+
+textarea {
+  width: 30%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.btn {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.4);
+
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}<!-- 
+    This HTML file is used to create a web page for decrypting a wallet.
+    It includes the necessary libraries (Web3 and jQuery) and a CSS file.
+    The page contains input fields for entering a password and selecting a wallet JSON file.
+    After clicking the "Decrypt Wallet" button, the script uses the Web3 library to decrypt the wallet using the provided password and the selected file.
+    The decrypted wallet address, private key, and keystore are then displayed in the respective textareas.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include the Web3 library -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- Include the jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include your CSS file -->
+    <link rel="stylesheet" href="./sendTransaction.css">
+    <title>Decrypt a wallet</title>
+
+</head>
+<body>
+        <h1>Load Wallet and Send a Transaction</h1>
+        <button id="loadWalletButton">Load Wallet</button>
+        <!-- Ask for a wallet password -->
+        <input type="password" id="password" placeholder="Enter a password for the Key Store">
+        <!-- Select a wallet json file from the file system -->
+        <input type="file" id="keystoreFile" accept=".json">
+        <br/>
+        <br/>
+
+        <label for="walletAddress">Wallet Address:</label>
+        <br/>
+        <textarea id="walletAddress" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="privateKey">Private Key:</label>
+        <br/>
+        <textarea id="privateKey" rows="5" cols="50"></textarea>
+        <br/>
+        <label for="keystore">Keystore File:</label>
+        <br/>
+        <textarea id="keystore" rows="5" cols="50"></textarea>
+    
+        <br/>
+        <label for="checkCounter">Check the counter on <a href="https://sepolia.etherscan.io/address/0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08" >0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08</a></label>
+        <br/>
+        <button id="checkCounterButton">Check Counter</button>
+        <br/>
+        <label id="checkCounter">Current Value: </label>
+        <br/>
+        <h3 for="incrementCounter">Increment the counter on <a href="https://sepolia.etherscan.io/address/0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08" >0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08</a></h3>
+        <br/>
+        <button id="incrementCounterButton">Increment Counter</button>
+        <br/>
+
+        <!-- Put the transaction request details here -->
+        <label for="transactionRequest">Transaction Request: </label>
+        <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+        <br/>
+        <!-- Put the transaction result details here -->
+        <label for="transactionResult">Transaction Result: </label>
+        <textarea id="transactionResult" rows="5" cols="50"></textarea>
+
+        <br/>
+        <br/>
+        <br/>
+
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+</body>
+
+<script>
+        // create a new web3 instance connected to Sepolia
+        var web3 = new Web3("https://rpc2.sepolia.org");
+
+        $("#loadWalletButton").click(function(){
+
+            // return if no password is entered
+            if ($("#password").val() == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a password");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            // load the contents of the file#
+            var file = $("#keystoreFile")[0].files[0];
+            // return if no file is selected
+            if (!file){
+                    // show the modal with the error
+                    $("#errorMessage").text("Please select a file");
+                    $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e){
+                var keystore = e.target.result;
+                var password = $("#password").val();
+                try {
+                    // decrypt the wallet
+                    var wallet = web3.eth.accounts.decrypt(keystore, password);
+                    // display the wallet address
+                    $("#walletAddress").val(wallet.address);
+                    // display the private key
+                    $("#privateKey").val(wallet.privateKey);
+                    // display the keystore
+                    $("#keystore").val(keystore);
+                } catch (error) {
+                    // show the modal with the error
+                    $("#errorMessage").text(error.message);
+                    $("#errorModal").css("display", "block");
+
+                }
+            };
+            reader.readAsText(file);
+
+
+        });
+
+        $("#checkCounterButton").click(function(){
+
+            // check the value in "counter" variable of the contract
+            var contractAddress = "0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            contract.methods.counter().call().then(function(result){
+                $("#checkCounter").text("Current Value: " + result);
+            });
+        });
+
+        // When the user clicks on <span> (x), close the modal
+        $("#closeModal").click(function() {
+            $("#errorModal").css("display", "none");
+        });
+
+        $("#incrementCounterButton").click(function(){
+            // increment the value in "counter" variable of the contract by sending a signed transaction using the private key
+            var privateKey = $("#privateKey").val();
+
+            // alert if no private key is entered
+            if (privateKey == ""){
+                // show the modal with the error
+                $("#errorMessage").text("Please enter a private key");
+                $("#errorModal").css("display", "block");
+                return;
+            }
+
+            var wallet = web3.eth.accounts.privateKeyToAccount(privateKey);
+            var contractAddress = "0x0075a2ea2e3a31b96bd3f5a9d177f54a15616f08";
+            var contract = new web3.eth.Contract(ABI, contractAddress);
+            var transaction = contract.methods.incrementCounter();
+            var encodedABI = transaction.encodeABI();
+            var tx = {
+                from: wallet.address,
+                to: contractAddress,
+                gas: 2000000,
+                data: encodedABI
+            };
+            web3.eth.accounts.signTransaction(tx, privateKey).then(function(signedTx){
+                web3.eth.sendSignedTransaction(signedTx.rawTransaction).on('receipt', function(receipt){
+                    $("#transactionRequest").val(JSON.stringify(tx));
+                    $("#transactionResult").val(JSON.stringify(receipt));
+                });
+            });
+
+        });
+        
+        const ABI = [
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "contractName",
+        "outputs": [
+            {
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "counter",
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "name": "name",
+                "type": "string"
+            }
+        ],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "constant": false,
+        "inputs": [],
+        "name": "incrementCounter",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "constant": false,
+        "inputs": [],
+        "name": "decrementCounter",
+        "outputs": [],
+        "payable": false,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+];
+</script>
+</html>/* FILEPATH: /c:/dev/web3examples/createWallet/createWallet.css */
+
+/* Apply a background color */
+body {
+  background-color: #f2f2f2;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Center the content */
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Add a box shadow to a card */
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Style a button */
+button {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* Add some spacing */
+.spacing {
+  margin-bottom: 20px;
+}
+
+textarea {
+  width: 30%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.btn {
+  background-color: #007bff;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.4);
+
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+interface IERC20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
+
+contract AndyToken is IERC20 {
+    string public name;
+    string public symbol;
+    uint8 public decimals;
+    uint256 private _totalSupply;
+    mapping(address => uint256) private _balances;
+    mapping(address => mapping(address => uint256)) private _allowances;
+
+    constructor(string memory _name, string memory _symbol, uint8 _decimals, uint256 initialSupply) {
+        name = _name;
+        symbol = _symbol;
+        decimals = _decimals;
+        _totalSupply = initialSupply * 10**uint256(decimals);
+        _balances[msg.sender] = _totalSupply;
+        emit Transfer(address(0), msg.sender, _totalSupply);
+    }
+
+    function totalSupply() external view override returns (uint256) {
+        return _totalSupply;
+    }
+
+    function balanceOf(address account) external view override returns (uint256) {
+        return _balances[account];
+    }
+
+    function transfer(address recipient, uint256 amount) external override returns (bool) {
+        _transfer(msg.sender, recipient, amount);
+        return true;
+    }
+
+    function allowance(address owner, address spender) external view override returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    function approve(address spender, uint256 amount) external override returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
+    }
+
+    function transferFrom(address sender, address recipient, uint256 amount) external override returns (bool) {
+        _transfer(sender, recipient, amount);
+        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
+        return true;
+    }
+
+    function _transfer(address sender, address recipient, uint256 amount) internal {
+        require(sender != address(0), "ERC20: transfer from the zero address");
+        require(recipient != address(0), "ERC20: transfer to the zero address");
+        require(_balances[sender] >= amount, "ERC20: transfer amount exceeds balance");
+        
+        _balances[sender] -= amount;
+        _balances[recipient] += amount;
+        emit Transfer(sender, recipient, amount);
+    }
+
+    function _approve(address owner, address spender, uint256 amount) internal {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+}

@@ -1,0 +1,161 @@
+/* left menu bar */
+.menu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 200px;
+    height: 100%;
+    background-color: #333;
+    color: #fff;
+    padding: 10px;
+    z-index: 100;
+}
+
+/* menu items */
+.menu a {
+    display: block;
+    color: #fff;
+    text-decoration: none;
+    padding: 10px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #222;
+}
+
+/* menu items on hover */
+.menu a:hover {
+    background-color: #444;
+}
+
+/* content */
+.content {
+    margin-left: 220px;
+    padding: 20px;
+}
+
+.menu ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.menu ul li {
+    padding: 10px;
+    border-bottom: 1px solid #222;
+}
+
+.menu ul li a {
+    color: #fff;
+    text-decoration: none;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.header {
+    background-color: #333;
+    color: #fff;
+    padding: 10px;
+    text-align: center;
+}
+
+.header h1 {
+    margin: 0;
+    background-color: #444;
+}
+
+.tabcontent {
+    display: none;
+}
+
+.tabshown {
+    display: block;
+}
+
+/* Add a box shadow to a card */
+.card {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Style a button */
+  button {
+    background-color: #007bff;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-family: 'Courier New', Courier, monospace;
+  }
+  
+  /* Add some spacing */
+  .spacing {
+    margin-bottom: 20px;
+  }
+  
+  textarea {
+    width: 50%;
+    height: 100px;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+  }
+  
+  .btn {
+    background-color: #444;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-family: 'Courier New', Courier, monospace;
+  }
+
+  /* make the length of an input field 100% */
+  input[type=text], select {
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+  /* make the length of an input field 100% */
+  input[type=password], select {
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+    input {
+        width: 50%;
+    }
+
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1;
+        left: 150px;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgb(0, 0, 0);
+        background-color: rgba(0, 0, 0, 0.4);
+      
+      }
+      
+      .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+      }
+

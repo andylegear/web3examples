@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- include css-->
+    <link rel="stylesheet" href="referenceProject.css">
+
+    <title>Document</title>
+</head>
+<body>
+    <!-- Header of the page -->
+    <div class="header">
+        <h1>Reference Project - Tickets DApp</h1>
+        
+    </div>
+
+    <!-- Menu bar on the left for various pages -->
+    <div class="menu">
+        <ul>
+            <li><a href="#" onclick="openTab(event, 'home')">Home</a></li>
+            <li><a href="#" onclick="openTab(event, 'createWallet')">Create Wallet</a></li>
+            <li><a href="#" onclick="openTab(event, 'checkBalances')">Check Balances</a></li>
+            <li><a href="#" onclick="openTab(event, 'buyTicket')">Buy a Ticket</a></li>
+            <li><a href="#" onclick="openTab(event, 'sendToVendor')">Send To Vendor</a></li>
+        </ul>
+    </div>
+    <!-- Main content of the page -->
+    <div class="content">
+
+        <!-- add sections for home, create wallet, check balance, buy ticket and send to vendor.  reveal and hide the sections depending on which menu item is clicked -->
+        <div id="home" class="tabcontent">
+            <h1>Project Brief</h1>
+            <h2>Module: Blockchain Technologies and Applications</h2>
+            
+            <h3>Summary</h3>
+            <p>Create a Web3 Distributed Application (DApp) that implements simple ticketing system. You should use the Ethereum Sepolia Testnet as you blockchain for Solidity smart contract deployments, and HTML, CSS and Javascript for your front end. You are free to use any development environments that you are comfortable with, however examples in this module will be demonstrated using Visual Studio Code and the Online Remix Solidity compiler and deployment tool.</p>
+            
+            <h3>Requirements</h3>
+            <ul>
+                <li>Front End:
+                    <ul>
+                        <li>Page allowing a user to create a wallet.
+                            <ul>
+                                <li>Should provide the ability to download the created wallet.</li>
+                                <li>Should display wallet details once created.</li>
+                            </ul>
+                        </li>
+                        <li>Page allowing a user to check their current crypto and ticket token balance.
+                            <ul>
+                                <li>To be used by the following actors:
+                                    <ul>
+                                        <li>Person attending the event so that they can confirm their purchase.</li>
+                                        <li>Doorman, so they can confirm a wallet is the holder of the ticket.</li>
+                                        <li>Venue, so they can check on distribution of tickets</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </li>
+                        <li>Page allowing a user to buy a ticket (token).</li>
+                        <li>Page allowing a user to transfer a ticket back to the vendor.</li>
+                    </ul>
+                </li>
+                <li>Blockchain Backend:
+                    <ul>
+                        <li>Smart contract implementing the ERC-20 standard and extended to allow tickets to be purchased using the native cryptocurrency of Sepolia (SETH)</li>
+                    </ul>
+                </li>
+                <li>Project should be submitted as a zipped solution</li>
+                <li>The project should be accompanied by a report detailing the following:
+                    <ul>
+                        <li>Code overview.</li>
+                        <li>Design description.</li>
+                        <li>Links to transactions on Sepolia’s blockchain explorer showing:
+                            <ul>
+                                <li>A successful deployment of your contract</li>
+                                <li>A successful execution of your contract to buy a token</li>
+                                <li>A successful topping up of separate wallets for:
+                                    <ul>
+                                        <li>Contract creator</li>
+                                        <li>Ticket Purchaser</li>
+                                        <li>Vendor / Doorman</li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </li>
+                        <li>A video of my reference implementation of the front end can be found here.</li>
+                    </ul>
+                </li>
+            </ul>
+            
+            <h3>Grading Rubrik</h3>
+            <ul>
+                <li>Front End (40%)
+                    <ul>
+                        <li>Wallet Creation Page (10%)
+                            <ul>
+                                <li>Ability to create a wallet: 5%</li>
+                                <li>Ability to download the created wallet: 2.5%</li>
+                                <li>Display of wallet details: 2.5%</li>
+                            </ul>
+                        </li>
+                        <li>Balance Check Page (10%)
+                            <ul>
+                                <li>Functionality for different actors (attendee, doorman, venue): 5%</li>
+                                <li>Accuracy of balance display: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Ticket Purchase Page (10%)
+                            <ul>
+                                <li>User-friendly interface: 3%</li>
+                                <li>Successful transaction process: 7%</li>
+                            </ul>
+                        </li>
+                        <li>Ticket Transfer Page (10%)
+                            <ul>
+                                <li>Ease of transferring tickets back to the vendor: 5%</li>
+                                <li>Correct update of token balance post-transfer: 5%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+                <li>Blockchain Backend (40%)
+                    <ul>
+                        <li>Smart Contract (20%)
+                            <ul>
+                                <li>Implementation of ERC-20 standard: 10%</li>
+                                <li>Extension for ticket purchase with SETH: 10%</li>
+                            </ul>
+                        </li>
+                        <li>Project Submission (10%)
+                            <ul>
+                                <li>Correct file structure in zipped solution: 5%</li>
+                                <li>Completeness of all required files: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Report (10%)
+                            <ul>
+                                <li>Code overview clarity: 3.33%</li>
+                                <li>Design description detail: 3.33%</li>
+                                <li>Links to transactions and their success: 3.34%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+                <li>Code Quality and Documentation (20%)
+                    <ul>
+                        <li>Code Readability (5%)
+                            <ul>
+                                <li>Commenting and documentation: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Code Efficiency (5%)
+                            <ul>
+                                <li>Optimization of code: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Error Handling (5%)
+                            <ul>
+                                <li>Proper error messages and handling: 5%</li>
+                            </ul>
+                        </li>
+                        <li>Code Testing (5%)
+                            <ul>
+                                <li>Comprehensive tests and coverage: 5%</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+            <p>Total: 100% (50% of Module grade)</p>
+        </div>
+        <div id="createWallet" class="tabcontent">
+
+            <h1>Create a Wallet</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="password" placeholder="Enter a password for the Key Store">
+            <br/>
+            <br/>
+            <button class="btn" id="createWalletButton">Create Wallet</button>
+            <br/>
+            <br/>
+    
+            <label for="walletAddress">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddress" contenteditable="false"></input>
+            <br/>
+            <br/>
+            <label for="privateKey">Private Key:</label>
+            <br/>
+            <input type="text" id="privateKey" rows="5" cols="50" contenteditable="false"></input>
+            <br/>
+            <br/>
+            <label for="keystore">Keystore File:</label>
+            <br/>
+            <textarea id="keystore" rows="5" cols="50" contenteditable="false"></textarea>
+        
+            <br/>
+            <br/>
+            <!-- Download the keystore as a file {wallet}.json -->
+            <a class="btn" id="downloadKeystore" download="wallet.json">Download Keystore</a>
+
+            <p>This JSON represents an Ethereum wallet in the Keystore format. Here's a breakdown of each part:</p>
+
+            <ul>
+                <li><strong>"version"</strong>: The version of the Keystore format. In this case, it's version 3.</li>
+                <li><strong>"id"</strong>: A unique identifier for the wallet. This is usually a UUID.</li>
+                <li><strong>"address"</strong>: The Ethereum address of the wallet. This is derived from the public key.</li>
+                <li><strong>"crypto"</strong>: This object contains the encrypted private key and the details about the encryption.</li>
+                <li><strong>"ciphertext"</strong>: The encrypted private key.</li>
+                <li><strong>"cipherparams"</strong>: The parameters used for the cipher. In this case, it includes the initialization vector ("iv") used for the AES-128-CTR cipher.</li>
+                <li><strong>"cipher"</strong>: The name of the cipher algorithm used to encrypt the private key. In this case, it's AES-128-CTR.</li>
+                <li><strong>"kdf"</strong>: The key derivation function used to derive a symmetric key from the password. In this case, it's scrypt.</li>
+                <li><strong>"kdfparams"</strong>: The parameters used for the key derivation function. It includes the length of the derived key ("dklen"), the salt used for key derivation ("salt"), and parameters specific to the scrypt function ("n", "r", "p").</li>
+                <li><strong>"mac"</strong>: A message authentication code that verifies the password entered by the user. It's generated from the derived key and the ciphertext.</li>
+            </ul>
+
+            <p>This format allows the private key of an Ethereum wallet to be securely stored and retrieved using a password.</p>
+        </div>
+        <div id="checkBalances" class="tabcontent tabshown">
+            <h1>Check Balances</h1>
+            <p>Checks balances for the native cryptocurrency SETH on Sepolia and the Ticket Token Contract deployed on sepolia to address <a href="https://sepolia.etherscan.io/address/0x0addc2283aba4345616c278e7429facec3a83951" target="_blank">0x0addc2283aba4345616c278e7429facec3a83951</a></p>
+            <label for="walletAddressBalance">Enter your wallet address:</label>
+            <input type="text" id="walletAddressBalance" name="walletAddress">
+            <br/>
+            <br/>
+            <button class="btn" id="checkBalancesButton">Check Balances</button>
+            <br/>
+            <br/>
+            <label id="cryptoBalance">Crypto Balance: </label>
+            <br/>
+            <br/>
+            <label id="tokenBalance">Token Balance:</label>
+            <br/>
+            <br/>
+        </div>
+        <div id="buyTicket" class="tabcontent">
+
+            <h1>Buy a Ticket</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="passwordBuy" placeholder="Enter a password for the Key Store">
+            <button class="btn" id="loadWalletButton">Load Wallet</button>
+            <!-- Select a wallet json file from the file system -->
+            <input type="file" id="keystoreFile" accept=".json">
+            <br/>
+            <br/>
+    
+            <label for="walletAddressBuy">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddressBuy" rows="5" cols="50"></input>
+            <input style="display: none;" type="text" id="privateKeyBuy" rows="5" cols="50"></input>
+            <br/>
+            <br/>
+            <br/>
+            <button class="btn" id="buyTokensButton">Buy Tickets</button>
+            <!-- Enter the amount to pay -->
+            <input id="amountToPay" type="number" id="amount" placeholder="0.00001 SETH Per Ticket">
+            <br/>
+    
+            <!-- Put the transaction request details here -->
+            <label for="transactionRequest">Transaction Request: </label>
+            <textarea id="transactionRequest" rows="5" cols="50"></textarea>
+            <br/>
+            <!-- Put the transaction result details here -->
+            <label for="transactionResult">Transaction Result: </label>
+            <textarea id="transactionResult" rows="5" cols="50"></textarea>
+    
+            <br/>
+            <br/>
+            <br/>
+    
+        </div>
+        <div id="sendToVendor" class="tabcontent">
+
+            <h1>Send Ticket To Vendor</h1>
+            <!-- Ask for a wallet password -->
+            <input type="password" id="passwordVendor" placeholder="Enter a password for the Key Store">
+            <button class="btn" id="loadWalletButtonVendor">Load Wallet</button>
+            <!-- Select a wallet json file from the file system -->
+            <input type="file" id="keystoreFileVendor" accept=".json">
+            <br/>
+            <br/>
+    
+            <label for="walletAddressVendor">Wallet Address:</label>
+            <br/>
+            <input type="text" id="walletAddressVendor" rows="5" cols="50"></input>
+            <input style="display: none;" type="text" id="privateKeyVendor" rows="5" cols="50"></input>
+            <br/>
+            <br/>
+            <br/>
+            <button class="btn" id="vendorTokensButton">Send Ticket To Vendor</button>
+            <!-- Enter the amount to pay -->
+            <br/>
+    
+            <!-- Put the transaction request details here -->
+            <label for="transactionRequestVendor">Transaction Request: </label>
+            <textarea id="transactionRequestVendor" rows="5" cols="50"></textarea>
+            <br/>
+            <!-- Put the transaction result details here -->
+            <label for="transactionResultVendor">Transaction Result: </label>
+            <textarea id="transactionResultVendor" rows="5" cols="50"></textarea>
+    
+            <br/>
+            <br/>
+            <br/>
+    
+        </div>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal">
+            <div class="modal-content">
+                <span id="closeModal" class="close">&times;</span>
+                <p id="errorMessage"></p>
+        </div>
+    </div>
+
+
+
+</body>
+
+    <!-- include jquery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- include web3 -->
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js/dist/web3.min.js"></script>
+    <!-- include js -->
+    <script src="referenceProject.js"></script>
+
+</html>

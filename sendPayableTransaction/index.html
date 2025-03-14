@@ -73,8 +73,11 @@
 
 <script>
         // create a new web3 instance connected to Sepolia
-        var web3 = new Web3("https://rpc-sepolia.rockx.com");
+        //var web3 = new Web3("https://rpc-sepolia.rockx.com");
 
+        // Or HETH
+        const web3 = new Web3("https://holesky.drpc.org");
+		
         $("#loadWalletButton").click(function(){
 
             // return if no password is entered
